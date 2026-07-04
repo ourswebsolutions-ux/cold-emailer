@@ -181,7 +181,7 @@ async function processSendJob(
     });
 
     try {
-const personalizedBody = body.replace(/\{\{name\}\}/g, email.split("@")[0]);
+      const personalizedBody = body.replace(/\{\{name\}\}/g, email.split("@")[0]);
 
 const mailOptions: nodemailer.SendMailOptions = {
   from: senderName ? `${senderName} <${senderEmail}>` : senderEmail,
@@ -189,43 +189,12 @@ const mailOptions: nodemailer.SendMailOptions = {
   subject,
   text: personalizedBody,
   html: `
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-</head>
-
-<body style="
-  margin:0;
-  padding:30px;
-  background:#f5f7fa;
-  font-family:Arial, Helvetica, sans-serif;
-">
-
-<div style="
-  max-width:650px;
-  margin:0 auto;
-  background:#ffffff;
-  border:1px solid #e5e7eb;
-  border-radius:12px;
-  padding:35px;
-  color:#333333;
-  font-size:16px;
-  line-height:1.8;
-  white-space:pre-wrap;
-  word-break:break-word;
-  box-sizing:border-box;
-">
-
-${personalizedBody}
-
-</div>
-
-</body>
-</html>
-`,
+    <div style="font-family:Arial,sans-serif;white-space:pre-wrap;line-height:1.6;">
+      ${personalizedBody}
+    </div>
+  `,
 };
+
       // Handle attachments
       const attachments: nodemailer.Attachment[] = [];
 
