@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-
+import Switch from "react-switch";
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -33,9 +33,13 @@ export default function SendPage() {
   const [singleFile, setSingleFile] = useState<File | null>(null)
   const [isSending, setIsSending] = useState(false)
   const [statuses, setStatuses] = useState<EmailStatus[]>([])
+  const [autoDelay, setAutoDelay] = useState(false);
+
   const [jobId, setJobId] = useState<string | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
   const fileInputsRef = useRef<Map<number, HTMLInputElement>>(new Map())
+  const [minDelay, setMinDelay] = useState("1");
+  const [maxDelay, setMaxDelay] = useState("2");
 
   useEffect(() => {
     const saved = sessionStorage.getItem("smtpConfig")
@@ -97,6 +101,9 @@ export default function SendPage() {
       formData.append("subject", subject)
       formData.append("body", body)
       formData.append("delay", delay)
+      formData.append("autoDelay", autoDelay.toString());
+      formData.append("minDelay", minDelay);
+      formData.append("maxDelay", maxDelay);
       formData.append("recipients", JSON.stringify(recipients.map((r) => r.email)))
 
       if (attachmentMode === "single" && singleFile) {
@@ -346,15 +353,58 @@ export default function SendPage() {
               </CardContent>
             </Card>
 
-            <Card className="animate-slideInLeft">
-              <CardHeader className="pb-4 sm:pb-6">
-                <CardTitle className="text-lg sm:text-xl">Send Settings</CardTitle>
+            <Card>
+              <CardHeader>
+                <CardTitle>Send Settings</CardTitle>
               </CardHeader>
-              <CardContent>
-                <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">
-                  Delay Between Sends (ms)
-                </label>
-                <Input value={delay} onChange={(e) => setDelay(e.target.value)} placeholder="500" className="text-sm" />
+
+              <CardContent className="space-y-4">
+
+                <div className="flex items-center justify-between">
+                  <span>Auto Random Delay</span>
+
+                  <Switch
+                    checked={autoDelay}
+                    onChange={setAutoDelay}
+                    onColor="#2563eb"
+                    offColor="#9ca3af"
+                    checkedIcon={false}
+                    uncheckedIcon={false}
+                    height={22}
+                    width={46}
+                  />
+                </div>
+
+                {!autoDelay ? (
+                  <>
+                    <label>Delay (ms)</label>
+
+                    <Input
+                      value={delay}
+                      onChange={(e) => setDelay(e.target.value)}
+                      placeholder="500"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <label>Minimum Delay (Minutes)</label>
+
+                    <Input
+                      value={minDelay}
+                      onChange={(e) => setMinDelay(e.target.value)}
+                      placeholder="1"
+                    />
+
+                    <label>Maximum Delay (Minutes)</label>
+
+                    <Input
+                      value={maxDelay}
+                      onChange={(e) => setMaxDelay(e.target.value)}
+                      placeholder="2"
+                    />
+                  </>
+                )}
+
               </CardContent>
             </Card>
           </div>

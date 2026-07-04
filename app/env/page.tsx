@@ -64,8 +64,8 @@ export default function EnvPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          host: config.host,
-          port: Number.parseInt(config.port),
+          host: config.host || "smtp.gmail.com" ,
+          port: Number.parseInt(config.port ) ?? 587,
           username: config.username,
           password: config.password,
         }),
@@ -113,7 +113,7 @@ export default function EnvPage() {
                 <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">SMTP Host</label>
                 <Input
                   name="host"
-                  value={config.host}
+                    value={config.host ?? "smtp.gmail.com"}
                   onChange={handleChange}
                   placeholder="smtp.mailtrap.io"
                   className="w-full text-sm"
@@ -123,7 +123,7 @@ export default function EnvPage() {
                 <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">SMTP Port</label>
                 <Input
                   name="port"
-                  value={config.port}
+                  value={config.port ?? "587"}
                   onChange={handleChange}
                   placeholder="2525"
                   className="w-full text-sm"
