@@ -392,7 +392,7 @@ const handleParseRecipients = () => {
                 <Textarea
                   value={recipientText}
                   onChange={(e) => setRecipientText(e.target.value)}
-                  placeholder="email1@example.com&#10;email2@example.com&#10;email3@example.com"
+                  placeholder="name,email1@example.com&#10;name,email2@example.com&#10;name,email3@example.com"
                   rows={4}
                   className="text-sm"
                 />
