@@ -4,7 +4,7 @@ generator client {
 
 datasource db {
   provider = "mysql"
-  url      = env("DATABASE_URL")
+  url = env("DATABASE_URL")
 }
 
 enum UserRole {
@@ -18,42 +18,32 @@ enum UserStatus {
 }
 
 model User {
-  id                   String      @id @default(cuid())
-
-  phone                String      @unique
-  passwordHash         String
-  name                 String?
-
-  role                 UserRole    @default(USER)
-  status               UserStatus  @default(DISABLED)
-
-  // Password/license expires after 30 days
-  passwordExpiresAt    DateTime
-
-  // Login session expires after 12 hours
-  sessionExpiresAt     DateTime?
-
-  createdAt            DateTime    @default(now())
-  updatedAt            DateTime    @updatedAt
-
-  smtpConfig           SMTPConfig?
+  id String @id @default(cuid())
+  phone String @unique
+  passwordHash String
+  name String?
+  role UserRole @default(USER)
+  status UserStatus @default(DISABLED)
+  passwordExpiresAt DateTime
+  sessionExpiresAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  smtpConfigs SMTPConfig[]
 }
 
 model SMTPConfig {
-  id          String   @id @default(cuid())
-
-  userId      String   @unique
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  host        String
-  port        Int
-
-  username    String
-  password    String
-
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  host String
+  port Int
+  username String
+  password String
   senderEmail String
-  senderName  String?
+  senderName String?
+  isActive Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  @@unique([userId, senderEmail])
 }

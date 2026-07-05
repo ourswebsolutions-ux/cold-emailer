@@ -1,125 +1,86 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
+import { AlertCircle, CheckCircle2, Loader2, Trash2 } from "lucide-react"
 
-interface SMTPConfig {
+interface SMTPAccount {
+  id: string
   host: string
-  port: string
+  port: number
   username: string
   password: string
   senderEmail: string
-  senderName: string
-  defaultDelay: string
+  senderName?: string
+  isActive: boolean
+  createdAt: string
 }
 
 export default function EnvPage() {
-  const [config, setConfig] = useState<SMTPConfig>({
+  const [config, setConfig] = useState({
     host: "",
     port: "2525",
     username: "",
     password: "",
     senderEmail: "",
     senderName: "",
-    defaultDelay: "500",
   })
 
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle")
   const [testMessage, setTestMessage] = useState("")
   const [saveMessage, setSaveMessage] = useState("")
   const [isLoadingConfig, setIsLoadingConfig] = useState(false)
+  const [isLoadingAccounts, setIsLoadingAccounts] = useState(false)
 
-  const [userId] = useState("cmr6decxk0000v3qkdxk7k7fp")
+  // Real userId from auth (cookie)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [smtpAccounts, setSmtpAccounts] = useState<SMTPAccount[]>([])
+  const [isDeleting, setIsDeleting] = useState<string | null>(null)
 
-  // Saved Email Accounts state
-  const [emails, setEmails] = useState<string[]>([
-    "admin@gmail.com",
-    "support@gmail.com",
-    "sales@gmail.com",
-    "info@gmail.com",
-    "marketing@gmail.com"
-  ])
-  const [selectedEmail, setSelectedEmail] = useState("admin@gmail.com")
-
-  // Fetch SMTP Config
-  const fetchConfig = async () => {
-    if (!userId) return
-    setIsLoadingConfig(true)
-    try {
-      const response = await fetch(`/api/config?userId=${userId}`)
-      if (response.ok) {
-        const result = await response.json()
-        console.log("SMTP Config Response:", result)
-
-        if (result.success && result.data) {
-          const data = result.data
-          setConfig({
-            host: data.host || "",
-            port: data.port?.toString() || "2525",
-            username: data.username || "",
-            password: data.password || "",
-            senderEmail: data.senderEmail || "",
-            senderName: data.senderName || "",
-            defaultDelay: "500",
-          })
-        }
+  // Get logged-in userId from cookie (set during login)
+  useEffect(() => {
+    const getUserIdFromCookie = () => {
+      const cookies = document.cookie.split("; ")
+      const userCookie = cookies.find(cookie => cookie.startsWith("userId="))
+      if (userCookie) {
+        const id = userCookie.split("=")[1]
+        setUserId(id)
+      } else {
+        console.warn("No userId cookie found. Please login.")
       }
-    } catch (error) {
-      console.error("Failed to fetch SMTP config from API:", error)
-      const saved = sessionStorage.getItem("smtpConfig")
-      if (saved) {
-        try {
-          setConfig(JSON.parse(saved))
-        } catch (e) {
-          console.error("Failed to load from session:", e)
-        }
-      }
-    } finally {
-      setIsLoadingConfig(false)
     }
-  }
 
-  // Fetch Emails
-  const fetchEmails = async () => {
+    getUserIdFromCookie()
+  }, [])
+
+  // Fetch all SMTP accounts for current user
+  const fetchSMTPAccounts = async () => {
     if (!userId) return
+
+    setIsLoadingAccounts(true)
     try {
       const response = await fetch(`/api/config?userId=${userId}`)
-      if (response.ok) {
-        const result = await response.json()
-        console.log("Fetched data for emails:", result)
+      const result = await response.json()
 
-        let emailList: string[] = []
-
-        if (result.success && result.data?.senderEmail) {
-          emailList = [result.data.senderEmail]
-        }
-
-        if (emailList.length === 0) {
-          emailList = [
-            "admin@gmail.com",
-            "support@gmail.com",
-            "sales@gmail.com",
-            "info@gmail.com",
-            "marketing@gmail.com"
-          ]
-        }
-
-        setEmails(emailList)
-        if (emailList.length > 0) setSelectedEmail(emailList[0])
+      if (result.success && Array.isArray(result.data)) {
+        setSmtpAccounts(result.data)
+      } else {
+        console.error("Failed to fetch accounts:", result.message)
       }
     } catch (error) {
-      console.error("Failed to fetch emails:", error)
+      console.error("Failed to fetch SMTP accounts:", error)
+    } finally {
+      setIsLoadingAccounts(false)
     }
   }
 
   useEffect(() => {
-    fetchConfig()
-    fetchEmails()
+    if (userId) {
+      fetchSMTPAccounts()
+    }
   }, [userId])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -127,19 +88,22 @@ export default function EnvPage() {
     setConfig((prev) => ({ ...prev, [name]: value }))
   }
 
-  // Only POST - No PUT
+  // Always create NEW account
   const handleSave = async () => {
-    sessionStorage.setItem("smtpConfig", JSON.stringify(config))
-
     if (!userId) {
-      setSaveMessage("Configuration saved to session (no userId)")
+      setSaveMessage("Please login first")
+      setTimeout(() => setSaveMessage(""), 3000)
+      return
+    }
+
+    if (!config.host || !config.port || !config.username || !config.password || !config.senderEmail) {
+      setSaveMessage("Please fill all required fields")
       setTimeout(() => setSaveMessage(""), 3000)
       return
     }
 
     try {
       const payload = {
-        userId,
         host: config.host,
         port: config.port,
         username: config.username,
@@ -157,21 +121,39 @@ export default function EnvPage() {
       const result = await response.json()
 
       if (response.ok && result.success) {
-        setSaveMessage("Configuration saved successfully to database")
-      } else if (result.message?.includes("already exists")) {
-        setSaveMessage("Configuration already exists. Please delete first or update manually.")
+        setSaveMessage("New SMTP account created successfully")
+        
+        // Clear form
+        setConfig({
+          host: "",
+          port: "2525",
+          username: "",
+          password: "",
+          senderEmail: "",
+          senderName: "",
+        })
+
+        // Refresh list
+        await fetchSMTPAccounts()
       } else {
-        setSaveMessage("Configuration saved to session only")
+        setSaveMessage(result.message || "Failed to create account")
       }
     } catch (error) {
-      console.error("API save failed:", error)
-      setSaveMessage("Configuration saved to session only")
+      console.error("Save failed:", error)
+      setSaveMessage("Failed to create SMTP account")
     }
 
-    setTimeout(() => setSaveMessage(""), 3000)
+    setTimeout(() => setSaveMessage(""), 4000)
   }
 
   const handleTestSMTP = async () => {
+    if (!config.host || !config.username || !config.password) {
+      setTestMessage("Please fill host, username and password")
+      setTestStatus("error")
+      setTimeout(() => { setTestStatus("idle"); setTestMessage(""); }, 3000)
+      return
+    }
+
     setTestStatus("testing")
     setTestMessage("")
 
@@ -180,7 +162,7 @@ export default function EnvPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          host: config.host || "smtp.gmail.com",
+          host: config.host,
           port: Number.parseInt(config.port) ?? 587,
           username: config.username,
           password: config.password,
@@ -204,8 +186,48 @@ export default function EnvPage() {
     setTimeout(() => setTestStatus("idle"), 5000)
   }
 
-  const handleEmailSelect = (email: string) => {
-    setSelectedEmail(email)
+  const handleActivate = async (id: string) => {
+    if (!userId) return
+
+    try {
+      const response = await fetch("/api/config/activate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, userId }),
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        await fetchSMTPAccounts()
+      }
+    } catch (error) {
+      console.error("Failed to activate account:", error)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this SMTP account?")) return
+
+    setIsDeleting(id)
+    try {
+      const response = await fetch(`/api/config?id=${id}`, {
+        method: "DELETE",
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        await fetchSMTPAccounts()
+      } else {
+        alert(result.message || "Failed to delete")
+      }
+    } catch (error) {
+      console.error("Delete failed:", error)
+      alert("Failed to delete account")
+    } finally {
+      setIsDeleting(null)
+    }
   }
 
   return (
@@ -216,7 +238,7 @@ export default function EnvPage() {
             SMTP Configuration
           </h1>
           <p className="text-muted-foreground max-w-md">
-            Manage your email sending accounts and SMTP settings
+            Manage multiple email sending accounts
           </p>
         </div>
 
@@ -225,94 +247,114 @@ export default function EnvPage() {
           <div className="lg:col-span-1">
             <Card className="rounded-2xl shadow-lg border border-border/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl h-full">
               <CardHeader>
-                <CardTitle className="text-xl">Saved Email Accounts</CardTitle>
+                <CardTitle className="text-xl flex items-center justify-between">
+                  Saved Email Accounts
+                  {isLoadingAccounts && <Loader2 className="w-4 h-4 animate-spin" />}
+                </CardTitle>
                 <CardDescription>
-                  Select which email account should be used for sending.
+                  Select active account for sending. Unlimited accounts supported.
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-1">
-                  {emails.map((email) => (
-                    <div
-                      key={email}
-                      onClick={() => handleEmailSelect(email)}
-                      className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-muted/70 cursor-pointer transition-all duration-200 group border border-transparent hover:border-border"
-                    >
-                      <input
-                        type="radio"
-                        name="selectedEmail"
-                        checked={selectedEmail === email}
-                        onChange={() => handleEmailSelect(email)}
-                        className="w-4 h-4 accent-primary cursor-pointer"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm text-foreground truncate">{email}</p>
-                        <p className="text-xs text-muted-foreground">Verified account</p>
+                {!userId ? (
+                  <p className="text-red-500 text-sm py-8 text-center">
+                    Please login to manage SMTP accounts
+                  </p>
+                ) : smtpAccounts.length === 0 ? (
+                  <p className="text-muted-foreground text-sm py-8 text-center">
+                    No SMTP accounts yet. Create one below.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {smtpAccounts.map((account) => (
+                      <div
+                        key={account.id}
+                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-200 group ${
+                          account.isActive 
+                            ? "border-primary bg-primary/5" 
+                            : "border-transparent hover:border-border hover:bg-muted/50"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="smtpAccount"
+                          checked={account.isActive}
+                          onChange={() => handleActivate(account.id)}
+                          className="w-4 h-4 accent-primary cursor-pointer"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm text-foreground truncate">{account.senderEmail}</p>
+                          {account.senderName && (
+                            <p className="text-xs text-muted-foreground truncate">{account.senderName}</p>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDelete(account.id)}
+                          disabled={isDeleting === account.id}
+                          className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-600 hover:bg-red-100/50"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                       </div>
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
 
                 <div className="mt-6 pt-6 border-t border-border">
                   <p className="text-xs text-muted-foreground">
-                    This selection will be used as the default sender for future email campaigns.
+                    Click radio button to make an account active. Active account is used for sending emails.
                   </p>
                 </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* RIGHT COLUMN - SMTP Settings */}
+          {/* RIGHT COLUMN - SMTP Settings Form */}
           <div className="lg:col-span-2 space-y-6">
             <Card className="rounded-2xl shadow-lg border border-border/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl">
               <CardHeader className="pb-6">
                 <CardTitle className="text-xl flex items-center gap-2">
-                  SMTP Settings
+                  Add New SMTP Account
                   {isLoadingConfig && <Loader2 className="w-4 h-4 animate-spin" />}
                 </CardTitle>
                 <CardDescription>
-                  These credentials are stored in your browser session and synced to your account
+                  Fill the form and click Save to create a new account. Previous accounts are preserved.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">SMTP Host</label>
-                    <Input name="host" value={config.host} onChange={handleChange} placeholder="smtp.mailtrap.io" className="w-full" />
+                    <Input name="host" value={config.host} onChange={handleChange} placeholder="smtp.gmail.com" className="w-full" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">SMTP Port</label>
-                    <Input name="port" value={config.port} onChange={handleChange} placeholder="2525" className="w-full" />
+                    <Input name="port" value={config.port} onChange={handleChange} placeholder="587" className="w-full" />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Username</label>
-                    <Input name="username" value={config.username} onChange={handleChange} placeholder="Your Mailtrap username" className="w-full" />
+                    <label className="block text-sm font-medium text-foreground mb-2">Username / Email</label>
+                    <Input name="username" value={config.username} onChange={handleChange} placeholder="your@email.com" className="w-full" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Password</label>
-                    <Input name="password" type="password" value={config.password} onChange={handleChange} placeholder="Your Mailtrap password" className="w-full" />
+                    <label className="block text-sm font-medium text-foreground mb-2">Password / App Password</label>
+                    <Input name="password" type="password" value={config.password} onChange={handleChange} placeholder="••••••••" className="w-full" />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Default Sender Email</label>
+                    <label className="block text-sm font-medium text-foreground mb-2">Sender Email</label>
                     <Input name="senderEmail" value={config.senderEmail} onChange={handleChange} placeholder="sender@example.com" className="w-full" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Default Sender Name</label>
-                    <Input name="senderName" value={config.senderName} onChange={handleChange} placeholder="Your Name" className="w-full" />
+                    <label className="block text-sm font-medium text-foreground mb-2">Sender Name (Optional)</label>
+                    <Input name="senderName" value={config.senderName} onChange={handleChange} placeholder="John Doe" className="w-full" />
                   </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-foreground mb-2">Default Delay (ms)</label>
-                  <Input name="defaultDelay" value={config.defaultDelay} onChange={handleChange} placeholder="500" className="w-full" />
-                  <p className="text-xs text-muted-foreground mt-2">Delay between sending each email</p>
                 </div>
               </CardContent>
             </Card>
@@ -320,14 +362,15 @@ export default function EnvPage() {
             <div className="flex flex-col sm:flex-row gap-4">
               <Button
                 onClick={handleSave}
+                disabled={!userId}
                 className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 py-6 rounded-2xl text-base font-medium"
               >
-                Save Configuration
+                Save New SMTP Account
               </Button>
               <Button
                 onClick={handleTestSMTP}
                 variant="outline"
-                disabled={testStatus === "testing"}
+                disabled={testStatus === "testing" || !userId}
                 className="flex-1 transition-all duration-200 py-6 rounded-2xl text-base font-medium border-2 hover:bg-muted"
               >
                 {testStatus === "testing" && <Loader2 className="w-5 h-5 mr-2 animate-spin" />}
@@ -365,7 +408,7 @@ export default function EnvPage() {
               </CardHeader>
               <CardContent className="text-sm text-amber-800 dark:text-amber-300 space-y-3">
                 <p>This tool is for testing purposes only. Mass unsolicited emails may violate laws and terms of service.</p>
-                <p>All SMTP credentials are stored in your browser session and synced securely to your account.</p>
+                <p>Credentials are stored securely in the database.</p>
               </CardContent>
             </Card>
           </div>

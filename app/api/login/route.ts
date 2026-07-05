@@ -1,7 +1,7 @@
 // app/api/login/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient, UserStatus } from "@prisma/client";
-import bcrypt from "bcryptjs";   // ← Add this
+import { PrismaClient, UserStatus, UserRole } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -10,90 +10,105 @@ export async function POST(request: NextRequest) {
     const { phone, password } = await request.json();
 
     if (!phone) {
-      return NextResponse.json(
-        { success: false, message: "Phone number is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, message: "Phone number is required" }, { status: 400 });
     }
 
+    // If password is provided → Create or Login
     if (password) {
-      // Hash the password
       const salt = await bcrypt.genSalt(10);
       const passwordHash = await bcrypt.hash(password, salt);
-
-      const sessionExpiresAt = new Date();
-      sessionExpiresAt.setDate(sessionExpiresAt.getDate() + 7);
 
       const passwordExpiresAt = new Date();
       passwordExpiresAt.setDate(passwordExpiresAt.getDate() + 30);
 
+      const sessionExpiresAt = new Date();
+      sessionExpiresAt.setHours(sessionExpiresAt.getHours() + 12);
+
       const user = await prisma.user.upsert({
         where: { phone },
         update: {
-          passwordHash,           // ← Fixed
+          passwordHash,
           status: UserStatus.ACTIVE,
-          sessionExpiresAt,
+          role: UserRole.ADMIN,
           passwordExpiresAt,
+          sessionExpiresAt,
         },
         create: {
           phone,
-          passwordHash,           // ← Fixed
+          passwordHash,
+          name: "Admin User",
+          role: UserRole.ADMIN,
           status: UserStatus.ACTIVE,
-          sessionExpiresAt,
           passwordExpiresAt,
+          sessionExpiresAt,
         },
       });
 
-      return NextResponse.json({
+      const response = NextResponse.json({
         success: true,
-        message: "Success",
-        user: {
-          id: user.id,
-          phone: user.phone,
-          status: user.status,
-        },
+        message: "Login successful",
+        user: { 
+          id: user.id, 
+          phone: user.phone, 
+          role: user.role 
+        }
       });
+
+      // ✅ SET COOKIE FOR FRONTEND
+      response.cookies.set({
+        name: "userId",
+        value: user.id,
+        httpOnly: false,           // Important: Allow JS to read it
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        maxAge: 12 * 60 * 60,      // 12 hours
+        path: "/",
+      });
+
+      return response;
     }
 
-    // Session validation (phone only)
+    // Session check (existing logic)
     const user = await prisma.user.findUnique({
       where: { phone },
       select: { 
         id: true, 
         phone: true, 
         status: true, 
-        sessionExpiresAt: true,
-        passwordHash: true   // needed for future login check
-      },
+        passwordExpiresAt: true, 
+        sessionExpiresAt: true, 
+        role: true 
+      }
     });
 
     if (!user || user.status !== UserStatus.ACTIVE) {
-      return NextResponse.json(
-        { success: false, message: "Invalid session" },
-        { status: 401 }
-      );
+      return NextResponse.json({ success: false, message: "Invalid credentials" }, { status: 401 });
     }
 
-    if (user.sessionExpiresAt && new Date(user.sessionExpiresAt) < new Date()) {
-      return NextResponse.json(
-        { success: false, message: "Session expired" },
-        { status: 401 }
-      );
+    if (new Date(user.passwordExpiresAt) < new Date()) {
+      return NextResponse.json({ 
+        success: false, 
+        message: "Your subscription has expired. Please contact us on WhatsApp." 
+      }, { status: 403 });
     }
 
-    return NextResponse.json({
-      success: true,
-      user: {
-        id: user.id,
-        phone: user.phone,
-        status: user.status,
-      },
+    const response = NextResponse.json({ success: true, user });
+
+    // Also set cookie on session check
+    response.cookies.set({
+      name: "userId",
+      value: user.id,
+      httpOnly: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 12 * 60 * 60,
+      path: "/",
     });
-  } catch (error: any) {
-    console.error("Login API Error:", error);
-    return NextResponse.json(
-      { success: false, message: "Internal server error" },
-      { status: 500 }
-    );
+
+    return response;
+
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ success: false, message: "Internal server error" }, { status: 500 });
   }
 }
