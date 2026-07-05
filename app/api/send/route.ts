@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import nodemailer from "nodemailer";
+import { PrismaClient, UserStatus, UserRole } from "@prisma/client";
+const prisma = new PrismaClient();
 
 interface SendJob {
   id: string;
@@ -23,9 +25,9 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
 
-    const senderEmail = formData.get("senderEmail") as string;
-    const senderName = formData.get("senderName") as string;
     const subject = formData.get("subject") as string;
+    const userId = formData.get("userId") as string;
+
     const body = formData.get("body") as string;
     const delay = Number.parseInt(formData.get("delay") as string) || 500;
 
@@ -36,13 +38,33 @@ export async function POST(request: NextRequest) {
     const recipientsRaw = formData.get("recipients") as string;
     const recipients: string[] = recipientsRaw ? JSON.parse(recipientsRaw) : [];
 
-    const smtpHost = request.headers.get("x-smtp-host") || process.env.SMTP_HOST;
-    const smtpPort = Number.parseInt(
-      request.headers.get("x-smtp-port") || process.env.SMTP_PORT || "587"
-    );
-    const smtpUsername = request.headers.get("x-smtp-username") || process.env.SMTP_USERNAME;
-    const smtpPassword = request.headers.get("x-smtp-password") || process.env.SMTP_PASSWORD;
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
 
+    const smtpConfig = await prisma.sMTPConfig.findFirst({
+      where: {
+        userId,
+        isActive: true,
+      },
+    });
+console.log(smtpConfig,"helo")
+    if (!smtpConfig) {
+      return NextResponse.json(
+        { error: "No active SMTP configuration found." },
+        { status: 400 }
+      );
+    }
+
+    const smtpHost = smtpConfig.host;
+    const smtpPort = smtpConfig.port;
+    const smtpUsername = smtpConfig.username;
+    const smtpPassword = smtpConfig.password;
+    const senderEmail = smtpConfig.senderEmail;
+    const senderName = smtpConfig.senderName || "";
     // Validation
     if (!senderEmail || !subject || !body || !recipients.length) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });

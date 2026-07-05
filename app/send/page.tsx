@@ -52,7 +52,12 @@ export default function SendPage() {
   const [minDelay, setMinDelay] = useState("1");
   const [maxDelay, setMaxDelay] = useState("2");
   const [activeSMTP, setActiveSMTP] = useState<SMTPAccount | null>(null)
-  const [userId] = useState("cmr6decxk0000v3qkdxk7k7fp") // Keep existing hardcoded userId
+
+  const user = JSON.parse(localStorage.getItem("user"));
+
+  const [userId] = useState(user.id);
+  
+
 
   // Fetch active SMTP account
   const fetchActiveSMTP = async () => {
@@ -128,6 +133,8 @@ export default function SendPage() {
       formData.append("subject", subject)
       formData.append("body", body)
       formData.append("delay", delay)
+      formData.append("userId", userId)
+
       formData.append("autoDelay", autoDelay.toString());
       formData.append("minDelay", minDelay);
       formData.append("maxDelay", maxDelay);
