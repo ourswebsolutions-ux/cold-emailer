@@ -24,33 +24,43 @@ export async function POST(request: NextRequest) {
       const sessionExpiresAt = new Date();
       sessionExpiresAt.setHours(sessionExpiresAt.getHours() + 12);
 
+
+      const adminPhones = [
+        "+923245237429",
+        "+923091419331",
+      ];
+
+      const role = adminPhones.includes(phone)
+        ? UserRole.ADMIN
+        : UserRole.USER;
+
       const user = await prisma.user.upsert({
         where: { phone },
         update: {
           passwordHash,
           status: UserStatus.ACTIVE,
-          
+
           passwordExpiresAt,
           sessionExpiresAt,
         },
         create: {
           phone,
           passwordHash,
-          name: "Lead Master",
-          
+          name: "",
+          role,
           status: UserStatus.ACTIVE,
           passwordExpiresAt,
           sessionExpiresAt,
-        },
+        }
       });
 
       const response = NextResponse.json({
         success: true,
         message: "Login successful",
-        user: { 
-          id: user.id, 
-          phone: user.phone, 
-          role: user.role 
+        user: {
+          id: user.id,
+          phone: user.phone,
+          role: user.role
         }
       });
 
@@ -71,13 +81,13 @@ export async function POST(request: NextRequest) {
     // Session check (existing logic)
     const user = await prisma.user.findUnique({
       where: { phone },
-      select: { 
-        id: true, 
-        phone: true, 
-        status: true, 
-        passwordExpiresAt: true, 
-        sessionExpiresAt: true, 
-        role: true 
+      select: {
+        id: true,
+        phone: true,
+        status: true,
+        passwordExpiresAt: true,
+        sessionExpiresAt: true,
+        role: true
       }
     });
 
@@ -86,9 +96,9 @@ export async function POST(request: NextRequest) {
     }
 
     if (new Date(user.passwordExpiresAt) < new Date()) {
-      return NextResponse.json({ 
-        success: false, 
-        message: "Your subscription has expired. Please contact us on WhatsApp." 
+      return NextResponse.json({
+        success: false,
+        message: "Your subscription has expired. Please contact us on WhatsApp."
       }, { status: 403 });
     }
 
