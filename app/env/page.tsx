@@ -403,12 +403,15 @@ export default function EnvPage() {
             )}
 
             <Card className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900/50 rounded-2xl">
-              <CardHeader className="pb-4">
+              <CardHeader className="pb-">
                 <CardTitle className="text-amber-900 dark:text-amber-200 text-lg">Security Notice</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-amber-800 dark:text-amber-300 space-y-3">
-                <p>This tool is for testing purposes only. Mass unsolicited emails may violate laws and terms of service.</p>
-                <p>Credentials are stored securely in the database.</p>
+            <p>This software is built with security and reliability as a top priority and is intended for legitimate and authorized use only. It follows industry-standard practices to ensure safe and responsible operation.</p>
+
+<p>All sensitive information is handled securely and stored using protected database systems with appropriate security measures in place.</p>
+
+<p>We are committed to maintaining user privacy, data protection, and system integrity at all times.</p>
               </CardContent>
             </Card>
           </div>

@@ -51,6 +51,7 @@ interface EmailStatus {
 }
 
 interface Recipient {
+  name: string
   email: string
   file?: File
 }
@@ -87,10 +88,19 @@ export default function SendPage() {
   const [maxDelay, setMaxDelay] = useState("2");
   const [activeSMTP, setActiveSMTP] = useState<SMTPAccount | null>(null)
 
-  const user = JSON.parse(localStorage.getItem("user"));
+  const [userId, setUserId] = useState<string>("");
 
-  const [userId] = useState(user.id);
-  
+
+useEffect(() => {
+  const user = localStorage.getItem("user");
+    // alert(user)
+
+  if (user) {
+    const parsedUser = JSON.parse(user);
+    console.log(parsedUser?.id)
+    setUserId(parsedUser?.id);
+  }
+}, []);  
 
 
   // Fetch active SMTP account
@@ -123,19 +133,65 @@ export default function SendPage() {
     fetchActiveSMTP()
   }, [userId])
 
-  const parseRecipients = (text: string): string[] => {
-    return text
-      .split(/[,\n]/)
-      .map((email) => email.trim())
-      .filter((email) => email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+const isEmailFor = (str: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str);
+
+  const parseRecipients = (text: string): Recipient[] => {
+  if (!text.trim()) return [];
+
+  // Split by commas or newlines
+  const parts = text
+    .split(/[\n,]/)           // split on newlines OR commas
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const recipients: Recipient[] = [];
+
+  for (let i = 0; i < parts.length; i++) {
+    const current = parts[i];
+
+    // Check if it looks like an email
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(current);
+
+    if (isEmail) {
+      // Previous item was name (if exists)
+      const name = i > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(parts[i - 1])
+        ? parts[i - 1]
+        : current.split("@")[0]; // fallback to local part
+
+      recipients.push({ name, email: current });
+      // Skip next if we consumed a name
+      if (i > 0 && !isEmailFor(parts[i - 1])) i++;
+    } else {
+      // Current is name, next should be email
+      const email = parts[i + 1];
+      if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        recipients.push({ name: current, email });
+        i++; // skip the email we just used
+      }
+    }
   }
 
-  const handleParseRecipients = () => {
-    const emails = parseRecipients(recipientText)
-    const newRecipients = emails.map((email) => ({ email }))
-    setRecipients(newRecipients)
-    setStatuses(emails.map((email, index) => ({ index, email, status: "pending" })))
+  return recipients;
+};
+
+// Helper
+
+
+const handleParseRecipients = () => {
+  const parsed = parseRecipients(recipientText);
+  setRecipients(parsed);
+  setStatuses(
+    parsed.map((recipient, index) => ({
+      index,
+      email: recipient.email,
+      status: "pending",
+    }))
+  );
+
+  if (parsed.length === 0 && recipientText.trim()) {
+    alert("No valid recipients found. Use format: name,email or one email per line.");
   }
+};
 
   const handleSingleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
@@ -152,7 +208,7 @@ export default function SendPage() {
   }
 
   const handleStartSending = async () => {
-    if (!activeSMTP || !senderEmail || !subject || !body || recipients.length === 0) {
+    if (!subject || !body || recipients.length === 0) {
       alert("Please configure at least one SMTP account, fill in all required fields, and add recipients")
       return
     }
@@ -172,8 +228,8 @@ export default function SendPage() {
       formData.append("autoDelay", autoDelay.toString());
       formData.append("minDelay", minDelay);
       formData.append("maxDelay", maxDelay);
-      formData.append("recipients", JSON.stringify(recipients.map((r) => r.email)))
-      formData.append("smtpId", activeSMTP.id)
+      formData.append("recipients", JSON.stringify(recipients))
+      
 
       if (attachmentMode === "single" && singleFile) {
         formData.append("singleAttachment", singleFile)
@@ -220,7 +276,10 @@ export default function SendPage() {
             const updated = [...prev]
             updated[update.index] = {
               index: update.index,
-              email: update.email,
+              email:
+  typeof update.email === "string"
+    ? update.email
+    : (update.email as any)?.email ?? "",
               status: update.status,
               message: update.message,
             }
@@ -275,7 +334,7 @@ export default function SendPage() {
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 p-4 sm:p-6 md:p-8">
       <div className="max-w-7xl mx-auto">
         <div className="mb-6 sm:mb-8 md:mb-12 animate-fadeInUp">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-foreground mb-2 sm:mb-3">Cold Email Sender</h1>
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-foreground mb-2 sm:mb-3">Cold <span className="text-blue-600">Email Sender</span></h1>
           <p className="text-sm sm:text-base text-muted-foreground">Send bulk emails with optional attachments</p>
         </div>
 
@@ -283,29 +342,12 @@ export default function SendPage() {
           {/* Left Panel - Compose */}
           <div className="lg:col-span-2 space-y-4 sm:space-y-6">
             <Card className="animate-slideInLeft">
-              <CardHeader className="pb-4 sm:pb-6">
+              <CardHeader className="pb- sm:pb-6">
                 <CardTitle className="text-lg sm:text-xl">Email Details</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 sm:space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">Sender Email</label>
-                    <div className="p-2 sm:p-3 bg-muted rounded-lg border border-input text-foreground text-sm">
-                      {senderEmail || "No active SMTP account. Please configure one."}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2">Active account from SMTP settings</p>
-                  </div>
-                  <div>
-                    <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">
-                      Sender Name (Optional)
-                    </label>
-                    <Input
-                      value={senderName}
-                      onChange={(e) => setSenderName(e.target.value)}
-                      placeholder="Your Name"
-                      className="text-sm"
-                    />
-                  </div>
+                 
                 </div>
 
                 <div>
@@ -491,7 +533,7 @@ export default function SendPage() {
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-2">
                   <Button
                     onClick={handleStartSending}
-                    disabled={isSending || recipients.length === 0 || !activeSMTP}
+                    disabled={isSending }
                     className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 text-sm"
                   >
                     <Send className="w-4 h-4 mr-2" />
@@ -540,7 +582,11 @@ export default function SendPage() {
                           <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin flex-shrink-0 mt-0.5" />
                         )}
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">{status.email}</p>
+                          <p className="font-medium truncate">
+  {typeof status.email === "string"
+    ? status.email
+    : status.email?.email || "unknown"}
+</p>
                           <p className="text-muted-foreground capitalize">{status.status}</p>
                           {status.message && <p className="text-red-600 dark:text-red-400 mt-0.5">{status.message}</p>}
                         </div>

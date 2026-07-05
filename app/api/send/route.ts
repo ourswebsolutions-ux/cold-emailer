@@ -36,8 +36,11 @@ export async function POST(request: NextRequest) {
     const maxDelay = Number(formData.get("maxDelay")) || 2;
 
     const recipientsRaw = formData.get("recipients") as string;
-    const recipients: string[] = recipientsRaw ? JSON.parse(recipientsRaw) : [];
+    type Recipient = { name: string; email: string };
 
+const recipients: Recipient[] = recipientsRaw ? JSON.parse(recipientsRaw) : [];
+
+    console.log(userId,"helo")
     if (!userId) {
       return NextResponse.json(
         { error: "Unauthorized" },
@@ -124,7 +127,7 @@ console.log(smtpConfig,"helo")
 
 async function processSendJob(
   jobId: string,
-  options: {
+ options: {
     senderEmail: string;
     senderName: string;
     subject: string;
@@ -133,7 +136,7 @@ async function processSendJob(
     autoDelay: boolean;
     minDelay: number;
     maxDelay: number;
-    recipients: string[];
+    recipients: { name: string; email: string }[];   // ← Fixed
     formData: FormData;
     smtpHost: string;
     smtpPort: number;
@@ -192,8 +195,8 @@ async function processSendJob(
   for (let i = 0; i < recipients.length; i++) {
     if (job.status === "stopped") break;
 
-    const email = recipients[i];
-
+const recipient = recipients[i];
+const email = recipient.email;
     // Progress: sending
     broadcastUpdate(job, {
       type: "progress",
@@ -203,7 +206,10 @@ async function processSendJob(
     });
 
     try {
-      const personalizedBody = body.replace(/\{\{name\}\}/g, email.split("@")[0]);
+      const personalizedBody = body.replace(
+  /\{\{name\}\}/g,
+  recipient.name || email.split("@")[0]
+);
 
 const mailOptions: nodemailer.SendMailOptions = {
   from: senderName ? `${senderName} <${senderEmail}>` : senderEmail,

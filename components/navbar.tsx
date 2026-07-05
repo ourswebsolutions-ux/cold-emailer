@@ -70,6 +70,7 @@ export default function Navbar() {
       } else {
         // Login successful
         localStorage.setItem("phone", phone);
+        localStorage.setItem("user", JSON.stringify(data.user));
         setLoggedIn(true);
         setPassword("");
       }
@@ -95,8 +96,8 @@ export default function Navbar() {
     return (
       <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-100 dark:bg-slate-950 p-4">
         <div className="w-full max-w-md rounded-2xl border bg-white dark:bg-slate-900 shadow-2xl p-8">
-          <div className="flex justify-center mb-8">
-            <img src="/logo.png" alt="Logo" className="h-16 w-auto" />
+          <div className="flex justify-center mb-8 md:-ml-4 border">
+            <img src="/logo.png" alt="Logo" className="h-16 md:-ml-4 w-auto" />
           </div>
 
           <h2 className="text-3xl font-bold text-center mb-2">
@@ -164,7 +165,7 @@ export default function Navbar() {
             href="/"
             className="flex items-center gap-2 sm:gap-3 font-bold text-lg sm:text-xl text-primary hover:text-primary/80 transition-colors flex-shrink-0"
           >
-            <img src="/logo.png" className=" -ml:-4 w-52" alt="Logo" />
+            <img src="/logo.png" className=" md:-ml-12 w-62" alt="Logo" />
           </Link>
 
           <div className="hidden sm:flex gap-6 lg:gap-8">

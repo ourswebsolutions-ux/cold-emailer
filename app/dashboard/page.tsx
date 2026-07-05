@@ -5,7 +5,7 @@ import {
   Users, UserCheck, UserX, UserMinus, Search, 
   RefreshCw, Lock, Trash2, X 
 } from 'lucide-react';
-
+import { useRouter } from "next/navigation";
 interface User {
   id: string;
   phone: string;
@@ -27,7 +27,7 @@ export default function AdminDashboard() {
   });
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-
+const router = useRouter();
   // Modal states
   const [renewModalOpen, setRenewModalOpen] = useState(false);
   const [changePassModalOpen, setChangePassModalOpen] = useState(false);
@@ -36,6 +36,28 @@ export default function AdminDashboard() {
   const [selectedPlan, setSelectedPlan] = useState("30");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+
+    const [role, setRole] = useState<string>("");
+  
+useEffect(() => {
+  const user = localStorage.getItem("user");
+
+  if (!user) {
+    router.push("/login");
+    return;
+  }
+
+  const parsedUser = JSON.parse(user);
+
+  if (parsedUser?.role !== "ADMIN") {
+    router.push("/send"); // or "/"
+    return;
+  }
+
+  setRole(parsedUser.role);
+}, []); 
+  
+  
 
   const fetchData = async () => {
     setLoading(true);
