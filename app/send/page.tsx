@@ -21,6 +21,17 @@ interface Recipient {
   file?: File
 }
 
+interface SMTPAccount {
+  id: string
+  senderEmail: string
+  senderName?: string
+  host: string
+  port: number
+  username: string
+  password: string
+  isActive: boolean
+}
+
 export default function SendPage() {
   const [senderEmail, setSenderEmail] = useState("")
   const [senderName, setSenderName] = useState("")
@@ -40,20 +51,38 @@ export default function SendPage() {
   const fileInputsRef = useRef<Map<number, HTMLInputElement>>(new Map())
   const [minDelay, setMinDelay] = useState("1");
   const [maxDelay, setMaxDelay] = useState("2");
+  const [activeSMTP, setActiveSMTP] = useState<SMTPAccount | null>(null)
+  const [userId] = useState("cmr6decxk0000v3qkdxk7k7fp") // Keep existing hardcoded userId
+
+  // Fetch active SMTP account
+  const fetchActiveSMTP = async () => {
+    if (!userId) return
+    try {
+      const response = await fetch(`/api/config?userId=${userId}`)
+      const result = await response.json()
+
+      if (result.success && result.data) {
+        const activeAccount = result.data.find((acc: SMTPAccount) => acc.isActive)
+        if (activeAccount) {
+          setActiveSMTP(activeAccount)
+          setSenderEmail(activeAccount.senderEmail)
+          setSenderName(activeAccount.senderName || "")
+        } else if (result.data.length > 0) {
+          // Fallback to first if none active
+          const first = result.data[0]
+          setActiveSMTP(first)
+          setSenderEmail(first.senderEmail)
+          setSenderName(first.senderName || "")
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch active SMTP:", error)
+    }
+  }
 
   useEffect(() => {
-    const saved = sessionStorage.getItem("smtpConfig")
-    if (saved) {
-      try {
-        const config = JSON.parse(saved)
-        setSenderEmail(config.senderEmail)
-        setSenderName(config.senderName)
-        setDelay(config.defaultDelay)
-      } catch (e) {
-        console.error("Failed to load config:", e)
-      }
-    }
-  }, [])
+    fetchActiveSMTP()
+  }, [userId])
 
   const parseRecipients = (text: string): string[] => {
     return text
@@ -84,8 +113,8 @@ export default function SendPage() {
   }
 
   const handleStartSending = async () => {
-    if (!senderEmail || !subject || !body || recipients.length === 0) {
-      alert("Please configure SMTP settings, fill in all required fields, and add recipients")
+    if (!activeSMTP || !senderEmail || !subject || !body || recipients.length === 0) {
+      alert("Please configure at least one SMTP account, fill in all required fields, and add recipients")
       return
     }
 
@@ -93,8 +122,6 @@ export default function SendPage() {
     setStatuses((prev) => prev.map((s) => ({ ...s, status: "pending" })))
 
     try {
-      const smtpConfig = JSON.parse(sessionStorage.getItem("smtpConfig") || "{}")
-
       const formData = new FormData()
       formData.append("senderEmail", senderEmail)
       formData.append("senderName", senderName)
@@ -105,6 +132,7 @@ export default function SendPage() {
       formData.append("minDelay", minDelay);
       formData.append("maxDelay", maxDelay);
       formData.append("recipients", JSON.stringify(recipients.map((r) => r.email)))
+      formData.append("smtpId", activeSMTP.id)
 
       if (attachmentMode === "single" && singleFile) {
         formData.append("singleAttachment", singleFile)
@@ -119,12 +147,6 @@ export default function SendPage() {
       const response = await fetch("/api/send", {
         method: "POST",
         body: formData,
-        headers: {
-          "x-smtp-host": smtpConfig.host || "",
-          "x-smtp-port": smtpConfig.port || "2525",
-          "x-smtp-username": smtpConfig.username || "",
-          "x-smtp-password": smtpConfig.password || "",
-        },
       })
 
       let data
@@ -228,9 +250,9 @@ export default function SendPage() {
                   <div>
                     <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">Sender Email</label>
                     <div className="p-2 sm:p-3 bg-muted rounded-lg border border-input text-foreground text-sm">
-                      {senderEmail || "Not configured"}
+                      {senderEmail || "No active SMTP account. Please configure one."}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-2">Configured in SMTP settings</p>
+                    <p className="text-xs text-muted-foreground mt-2">Active account from SMTP settings</p>
                   </div>
                   <div>
                     <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">
@@ -264,7 +286,7 @@ export default function SendPage() {
                     rows={6}
                     className="text-sm"
                   />
-                  <p className="text-xs text-muted-foreground mt-2">Tip: Use {`{{'name'}}`} to personalize emails</p>
+                  <p className="text-xs text-muted-foreground mt-2">Tip: Use {`{{name}}`} to personalize emails</p>
                 </div>
               </CardContent>
             </Card>
@@ -421,7 +443,7 @@ export default function SendPage() {
                 <div className="flex flex-col sm:flex-row lg:flex-col gap-2">
                   <Button
                     onClick={handleStartSending}
-                    disabled={isSending || recipients.length === 0 || !senderEmail}
+                    disabled={isSending || recipients.length === 0 || !activeSMTP}
                     className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 text-sm"
                   >
                     <Send className="w-4 h-4 mr-2" />
