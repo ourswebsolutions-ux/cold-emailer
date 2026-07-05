@@ -212,6 +212,8 @@ export default function SendPage() {
     }
   }
 
+ 
+  
   const handleStop = () => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
