@@ -8,6 +8,40 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
 import { AlertCircle, CheckCircle2, Send, Trash2, Pause } from "lucide-react"
+import dynamic from "next/dynamic"
+import "react-quill-new/dist/quill.snow.css"
+
+const ReactQuill = dynamic(() => import("react-quill-new"), {
+  ssr: false,
+})
+
+const quillModules = {
+  toolbar: [
+    [{ font: [] }],
+    [{ size: ["small", false, "large", "huge"] }],
+    ["bold", "italic", "underline", "strike"],
+    [{ color: [] }, { background: [] }],
+    [{ align: [] }],
+    [{ list: "ordered" }, { list: "bullet" }],
+    ["blockquote", "link"],
+    ["clean"],
+  ],
+}
+
+const quillFormats = [
+  "font",
+  "size",
+  "bold",
+  "italic",
+  "underline",
+  "strike",
+  "color",
+  "background",
+  "align",
+  "list",
+  "blockquote",
+  "link",
+]
 
 interface EmailStatus {
   index: number
@@ -286,13 +320,20 @@ export default function SendPage() {
 
                 <div>
                   <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">Message Body</label>
-                  <Textarea
-                    value={body}
-                    onChange={(e) => setBody(e.target.value)}
-                    placeholder="Use {{name}} for recipient name token"
-                    rows={6}
-                    className="text-sm"
-                  />
+                  <div className="border rounded-lg overflow-hidden">
+                    <ReactQuill
+                      theme="snow"
+                      value={body}
+                      onChange={setBody}
+                      modules={quillModules}
+                      formats={quillFormats}
+                      placeholder="Use {{name}} for recipient name token"
+                      style={{
+                        height: "250px",
+                        marginBottom: "42px",
+                      }}
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground mt-2">Tip: Use {`{{name}}`} to personalize emails</p>
                 </div>
               </CardContent>
