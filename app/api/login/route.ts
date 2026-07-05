@@ -29,15 +29,15 @@ export async function POST(request: NextRequest) {
         update: {
           passwordHash,
           status: UserStatus.ACTIVE,
-          role: UserRole.ADMIN,
+          
           passwordExpiresAt,
           sessionExpiresAt,
         },
         create: {
           phone,
           passwordHash,
-          name: "Admin User",
-          role: UserRole.ADMIN,
+          name: "Lead Master",
+          
           status: UserStatus.ACTIVE,
           passwordExpiresAt,
           sessionExpiresAt,
