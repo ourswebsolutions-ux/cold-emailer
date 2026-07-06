@@ -216,11 +216,7 @@ const mailOptions: nodemailer.SendMailOptions = {
   to: email,
   subject,
   text: personalizedBody,
-  html: `
-    <div style="font-family:Arial,sans-serif;white-space:pre-wrap;line-height:1.6;">
-      ${personalizedBody}
-    </div>
-  `,
+  html: personalizedBody
 };
 
       // Handle attachments

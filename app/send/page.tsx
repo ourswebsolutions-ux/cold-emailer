@@ -1,13 +1,13 @@
 "use client"
 
 import type React from "react"
-import Switch from "react-switch";
+import Switch from "react-switch"
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { AlertCircle, CheckCircle2, Send, Trash2, Pause } from "lucide-react"
+import { AlertCircle, CheckCircle2, Send, Trash2, Pause, Upload } from "lucide-react"
 import dynamic from "next/dynamic"
 import "react-quill-new/dist/quill.snow.css"
 
@@ -29,18 +29,8 @@ const quillModules = {
 }
 
 const quillFormats = [
-  "font",
-  "size",
-  "bold",
-  "italic",
-  "underline",
-  "strike",
-  "color",
-  "background",
-  "align",
-  "list",
-  "blockquote",
-  "link",
+  "font", "size", "bold", "italic", "underline", "strike",
+  "color", "background", "align", "list", "blockquote", "link",
 ]
 
 interface EmailStatus {
@@ -79,50 +69,75 @@ export default function SendPage() {
   const [singleFile, setSingleFile] = useState<File | null>(null)
   const [isSending, setIsSending] = useState(false)
   const [statuses, setStatuses] = useState<EmailStatus[]>([])
-  const [autoDelay, setAutoDelay] = useState(false);
+  const [autoDelay, setAutoDelay] = useState(false)
+
+  // CSV Preview States
+  const [showCsvPreview, setShowCsvPreview] = useState(false)
+  const [csvPreviewData, setCsvPreviewData] = useState<Recipient[]>([])
+  const [tempCsvText, setTempCsvText] = useState("")
 
   const [jobId, setJobId] = useState<string | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
   const fileInputsRef = useRef<Map<number, HTMLInputElement>>(new Map())
-  const [minDelay, setMinDelay] = useState("1");
-  const [maxDelay, setMaxDelay] = useState("2");
+  const [minDelay, setMinDelay] = useState("1")
+  const [maxDelay, setMaxDelay] = useState("2")
   const [activeSMTP, setActiveSMTP] = useState<SMTPAccount | null>(null)
+  const [userId, setUserId] = useState<string>("")
 
-  const [userId, setUserId] = useState<string>("");
+  const csvFileInputRef = useRef<HTMLInputElement>(null)
 
+  // ==================== DRAFT PERSISTENCE ====================
+  const DRAFT_KEY = "coldEmailDraft_v1"
 
-useEffect(() => {
-  const user = localStorage.getItem("user");
-    // alert(user)
+  // Load draft on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY)
+      if (saved) {
+        const draft = JSON.parse(saved)
+        if (draft.subject) setSubject(draft.subject)
+        if (draft.body) setBody(draft.body)
+      }
+    } catch (e) {
+      console.error("Failed to load draft", e)
+    }
+  }, [])
 
-  if (user) {
-    const parsedUser = JSON.parse(user);
-    console.log(parsedUser?.id)
-    setUserId(parsedUser?.id);
+  // Auto save draft
+  useEffect(() => {
+    try {
+      const draft = { subject, body, timestamp: Date.now() }
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+    } catch (e) {
+      console.error("Failed to save draft", e)
+    }
+  }, [subject, body])
+
+  const clearDraft = () => {
+    localStorage.removeItem(DRAFT_KEY)
   }
-}, []);  
 
+  // ==================== USER & SMTP ====================
+  useEffect(() => {
+    const user = localStorage.getItem("user")
+    if (user) {
+      try {
+        const parsedUser = JSON.parse(user)
+        setUserId(parsedUser?.id)
+      } catch (e) { }
+    }
+  }, [])
 
-  // Fetch active SMTP account
   const fetchActiveSMTP = async () => {
     if (!userId) return
     try {
       const response = await fetch(`/api/config?userId=${userId}`)
       const result = await response.json()
-
-      if (result.success && result.data) {
-        const activeAccount = result.data.find((acc: SMTPAccount) => acc.isActive)
-        if (activeAccount) {
-          setActiveSMTP(activeAccount)
-          setSenderEmail(activeAccount.senderEmail)
-          setSenderName(activeAccount.senderName || "")
-        } else if (result.data.length > 0) {
-          // Fallback to first if none active
-          const first = result.data[0]
-          setActiveSMTP(first)
-          setSenderEmail(first.senderEmail)
-          setSenderName(first.senderName || "")
-        }
+      if (result.success && result.data?.length) {
+        const activeAccount = result.data.find((acc: SMTPAccount) => acc.isActive) || result.data[0]
+        setActiveSMTP(activeAccount)
+        setSenderEmail(activeAccount.senderEmail)
+        setSenderName(activeAccount.senderName || "")
       }
     } catch (error) {
       console.error("Failed to fetch active SMTP:", error)
@@ -133,65 +148,95 @@ useEffect(() => {
     fetchActiveSMTP()
   }, [userId])
 
-const isEmailFor = (str: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str);
+  const isEmailFor = (str: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)
 
-  const parseRecipients = (text: string): Recipient[] => {
-  if (!text.trim()) return [];
+  // ==================== CSV HANDLING ====================
+  const parseCsvToRecipients = (csvText: string): Recipient[] => {
+    const lines = csvText.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+    const result: Recipient[] = []
 
-  // Split by commas or newlines
-  const parts = text
-    .split(/[\n,]/)           // split on newlines OR commas
-    .map((p) => p.trim())
-    .filter(Boolean);
+    for (const line of lines) {
+      const columns = line.split(',').map(col => col.trim().replace(/^"|"$/g, ''))
+      if (columns.length === 0) continue
 
-  const recipients: Recipient[] = [];
+      if (columns[0].toLowerCase() === "name" && 
+          (columns[1]?.toLowerCase() === "email" || columns[1]?.toLowerCase() === "e-mail")) {
+        continue
+      }
 
-  for (let i = 0; i < parts.length; i++) {
-    const current = parts[i];
+      let name = columns[0] || ""
+      let email = columns.length > 1 ? columns[1] : columns[0]
 
-    // Check if it looks like an email
-    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(current);
+      if (!isEmailFor(email) && isEmailFor(name)) {
+        [name, email] = [email, name]
+      }
 
-    if (isEmail) {
-      // Previous item was name (if exists)
-      const name = i > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(parts[i - 1])
-        ? parts[i - 1]
-        : current.split("@")[0]; // fallback to local part
-
-      recipients.push({ name, email: current });
-      // Skip next if we consumed a name
-      if (i > 0 && !isEmailFor(parts[i - 1])) i++;
-    } else {
-      // Current is name, next should be email
-      const email = parts[i + 1];
-      if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        recipients.push({ name: current, email });
-        i++; // skip the email we just used
+      if (isEmailFor(email)) {
+        result.push({ name: name || email.split("@")[0], email: email.trim() })
       }
     }
+    return result
   }
 
-  return recipients;
-};
+  const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
 
-// Helper
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      alert("Please select a valid CSV file.")
+      return
+    }
 
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const csvText = event.target?.result as string
+      if (!csvText) return
 
-const handleParseRecipients = () => {
-  const parsed = parseRecipients(recipientText);
-  setRecipients(parsed);
-  setStatuses(
-    parsed.map((recipient, index) => ({
+      const parsed = parseCsvToRecipients(csvText)
+      if (parsed.length === 0) {
+        alert("No valid recipients found in the CSV file.")
+        return
+      }
+
+      setCsvPreviewData(parsed)
+      setTempCsvText(parsed.map(r => `${r.name},${r.email}`).join("\n"))
+      setShowCsvPreview(true)
+    }
+    reader.readAsText(file)
+    e.target.value = ""
+  }
+
+  const parseRecipients = (text: string): Recipient[] => {
+    if (!text.trim()) return []
+    const parts = text.split(/[\n,]/).map(p => p.trim()).filter(Boolean)
+    const recipients: Recipient[] = []
+
+    for (let i = 0; i < parts.length; i++) {
+      const current = parts[i]
+      if (isEmailFor(current)) {
+        const name = i > 0 && !isEmailFor(parts[i - 1]) ? parts[i - 1] : current.split("@")[0]
+        recipients.push({ name, email: current })
+        if (i > 0 && !isEmailFor(parts[i - 1])) i++
+      } else {
+        const email = parts[i + 1]
+        if (email && isEmailFor(email)) {
+          recipients.push({ name: current, email })
+          i++
+        }
+      }
+    }
+    return recipients
+  }
+
+  const handleParseRecipients = () => {
+    const parsed = parseRecipients(recipientText)
+    setRecipients(parsed)
+    setStatuses(parsed.map((recipient, index) => ({
       index,
       email: recipient.email,
       status: "pending",
-    }))
-  );
-
-  if (parsed.length === 0 && recipientText.trim()) {
-    alert("No valid recipients found. Use format: name,email or one email per line.");
+    })))
   }
-};
 
   const handleSingleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
@@ -209,7 +254,7 @@ const handleParseRecipients = () => {
 
   const handleStartSending = async () => {
     if (!subject || !body || recipients.length === 0) {
-      alert("Please configure at least one SMTP account, fill in all required fields, and add recipients")
+      alert("Please fill in all required fields and add recipients")
       return
     }
 
@@ -224,20 +269,16 @@ const handleParseRecipients = () => {
       formData.append("body", body)
       formData.append("delay", delay)
       formData.append("userId", userId)
-
-      formData.append("autoDelay", autoDelay.toString());
-      formData.append("minDelay", minDelay);
-      formData.append("maxDelay", maxDelay);
+      formData.append("autoDelay", autoDelay.toString())
+      formData.append("minDelay", minDelay)
+      formData.append("maxDelay", maxDelay)
       formData.append("recipients", JSON.stringify(recipients))
-      
 
       if (attachmentMode === "single" && singleFile) {
         formData.append("singleAttachment", singleFile)
       } else if (attachmentMode === "per-recipient") {
         recipients.forEach((r, i) => {
-          if (r.file) {
-            formData.append(`attachment_${i}`, r.file)
-          }
+          if (r.file) formData.append(`attachment_${i}`, r.file)
         })
       }
 
@@ -246,40 +287,27 @@ const handleParseRecipients = () => {
         body: formData,
       })
 
-      let data
-      try {
-        data = await response.json()
-      } catch (parseError) {
-        console.error("[v0] Failed to parse response:", parseError)
-        const text = await response.text()
-        console.error("[v0] Response text:", text)
-        alert("Error: Server returned an invalid response. Check console for details.")
-        setIsSending(false)
-        return
-      }
+      const data = await response.json()
 
       if (!response.ok) {
-        alert("Error starting send job: " + (data.error || "Unknown error"))
+        alert("Error: " + (data.error || "Unknown error"))
         setIsSending(false)
         return
       }
 
       setJobId(data.jobId)
+      clearDraft() // Clear draft after successful send start
 
       const eventSource = new EventSource(`/api/send?jobId=${data.jobId}`)
 
       eventSource.onmessage = (event) => {
         const update = JSON.parse(event.data)
-
         if (update.type === "progress") {
           setStatuses((prev) => {
             const updated = [...prev]
             updated[update.index] = {
               index: update.index,
-              email:
-  typeof update.email === "string"
-    ? update.email
-    : (update.email as any)?.email ?? "",
+              email: typeof update.email === "string" ? update.email : (update.email as any)?.email ?? "",
               status: update.status,
               message: update.message,
             }
@@ -292,21 +320,18 @@ const handleParseRecipients = () => {
       }
 
       eventSource.onerror = () => {
-        console.error("[v0] EventSource error")
         setIsSending(false)
         eventSource.close()
       }
 
       eventSourceRef.current = eventSource
     } catch (error) {
-      console.error("[v0] Error:", error)
-      alert("Error: " + (error instanceof Error ? error.message : "Unknown error"))
+      console.error(error)
+      alert("Error starting send job")
       setIsSending(false)
     }
   }
 
- 
-  
   const handleStop = () => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
@@ -321,6 +346,7 @@ const handleParseRecipients = () => {
     setSingleFile(null)
     setSubject("")
     setBody("")
+    clearDraft()
     fileInputsRef.current.forEach((input) => {
       input.value = ""
     })
@@ -334,34 +360,31 @@ const handleParseRecipients = () => {
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 p-4 sm:p-6 md:p-8">
       <div className="max-w-7xl mx-auto">
         <div className="mb-6 sm:mb-8 md:mb-12 animate-fadeInUp">
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-foreground mb-2 sm:mb-3">Cold <span className="text-blue-600">Email Sender</span></h1>
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-foreground mb-2 sm:mb-3">
+            Cold <span className="text-blue-600">Email Sender</span>
+          </h1>
           <p className="text-sm sm:text-base text-muted-foreground">Send bulk emails with optional attachments</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-          {/* Left Panel - Compose */}
           <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+            {/* Email Details */}
             <Card className="animate-slideInLeft">
-              <CardHeader className="pb- sm:pb-6">
+              <CardHeader>
                 <CardTitle className="text-lg sm:text-xl">Email Details</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4 sm:space-y-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                 
-                </div>
-
+              <CardContent className="space-y-6">
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">Subject</label>
+                  <label className="block text-sm font-medium mb-2">Subject</label>
                   <Input
                     value={subject}
                     onChange={(e) => setSubject(e.target.value)}
                     placeholder="Email subject"
-                    className="text-sm"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">Message Body</label>
+                  <label className="block text-sm font-medium mb-2">Message Body</label>
                   <div className="border rounded-lg overflow-hidden">
                     <ReactQuill
                       theme="snow"
@@ -370,23 +393,30 @@ const handleParseRecipients = () => {
                       modules={quillModules}
                       formats={quillFormats}
                       placeholder="Use {{name}} for recipient name token"
-                      style={{
-                        height: "250px",
-                        marginBottom: "42px",
-                      }}
+                      style={{ height: "250px", marginBottom: "42px" }}
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-2">Tip: Use {`{{name}}`} to personalize emails</p>
+                  <p className="text-xs text-muted-foreground mt-2">Tip: Use {'{{name}}'} to personalize emails</p>
                 </div>
               </CardContent>
             </Card>
 
+            {/* Recipients */}
             <Card className="animate-slideInLeft">
-              <CardHeader className="pb-4 sm:pb-6">
-                <CardTitle className="text-lg sm:text-xl">Recipients</CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Paste emails one per line or comma-separated
-                </CardDescription>
+              <CardHeader className="flex flex-row items-start justify-between pb-4">
+                <div>
+                  <CardTitle>Recipients</CardTitle>
+                  <CardDescription>Paste emails or import CSV</CardDescription>
+                </div>
+                <Button
+                  onClick={() => csvFileInputRef.current?.click()}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2"
+                >
+                  <Upload className="w-4 h-4" />
+                  Import CSV
+                </Button>
               </CardHeader>
               <CardContent className="space-y-4">
                 <Textarea
@@ -396,19 +426,24 @@ const handleParseRecipients = () => {
                   rows={4}
                   className="text-sm"
                 />
-                <Button
-                  onClick={handleParseRecipients}
-                  variant="outline"
-                  className="w-full transition-all duration-200 bg-transparent"
-                >
+                <Button onClick={handleParseRecipients} variant="outline" className="w-full">
                   Parse Recipients ({recipients.length})
                 </Button>
+
+                <input
+                  ref={csvFileInputRef}
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCsvImport}
+                  className="hidden"
+                />
               </CardContent>
             </Card>
 
+            {/* Attachments */}
             <Card className="animate-slideInLeft">
-              <CardHeader className="pb-4 sm:pb-6">
-                <CardTitle className="text-lg sm:text-xl">Attachments</CardTitle>
+              <CardHeader>
+                <CardTitle>Attachments</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex flex-col sm:flex-row gap-2">
@@ -417,7 +452,7 @@ const handleParseRecipients = () => {
                       key={mode}
                       variant={attachmentMode === mode ? "default" : "outline"}
                       onClick={() => setAttachmentMode(mode)}
-                      className="flex-1 text-xs sm:text-sm transition-all duration-200"
+                      className="flex-1"
                     >
                       {mode === "none" ? "No Attachments" : mode === "single" ? "Single File" : "Per-Recipient"}
                     </Button>
@@ -426,40 +461,29 @@ const handleParseRecipients = () => {
 
                 {attachmentMode === "single" && (
                   <div>
-                    <label className="block text-xs sm:text-sm font-medium text-foreground mb-2">Upload File</label>
+                    <label className="block text-sm font-medium mb-2">Upload Single File</label>
                     <input
                       type="file"
                       onChange={handleSingleFileChange}
                       accept=".pdf,.docx,.doc"
-                      className="block w-full text-xs sm:text-sm text-muted-foreground"
+                      className="block w-full text-sm"
                     />
-                    {singleFile && (
-                      <p className="text-xs text-green-600 dark:text-green-400 mt-2">Selected: {singleFile.name}</p>
-                    )}
+                    {singleFile && <p className="text-green-600 mt-2">Selected: {singleFile.name}</p>}
                   </div>
                 )}
 
                 {attachmentMode === "per-recipient" && recipients.length > 0 && (
                   <div className="space-y-2 max-h-48 overflow-y-auto">
                     {recipients.map((recipient, index) => (
-                      <div key={index} className="flex items-center gap-2 p-2 sm:p-3 bg-muted rounded-lg">
-                        <span className="text-xs sm:text-sm flex-1 truncate">{recipient.email}</span>
+                      <div key={index} className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+                        <span className="flex-1 truncate">{recipient.email}</span>
                         <input
-                          ref={(el) => {
-                            if (el) {
-                              fileInputsRef.current.set(index, el)
-                            }
-                          }}
+                          ref={(el) => { if (el) fileInputsRef.current.set(index, el) }}
                           type="file"
                           onChange={(e) => handlePerRecipientFileChange(index, e.target.files?.[0] || null)}
                           accept=".pdf,.docx,.doc"
-                          className="text-xs"
                         />
-                        {recipient.file && (
-                          <span className="text-xs text-green-600 dark:text-green-400 font-medium">
-                            {recipient.file.name}
-                          </span>
-                        )}
+                        {recipient.file && <span className="text-green-600 text-sm">{recipient.file.name}</span>}
                       </div>
                     ))}
                   </div>
@@ -467,23 +491,19 @@ const handleParseRecipients = () => {
               </CardContent>
             </Card>
 
+            {/* Send Settings */}
             <Card>
               <CardHeader>
                 <CardTitle>Send Settings</CardTitle>
               </CardHeader>
-
               <CardContent className="space-y-4">
-
                 <div className="flex items-center justify-between">
                   <span>Auto Random Delay</span>
-
                   <Switch
                     checked={autoDelay}
                     onChange={setAutoDelay}
                     onColor="#2563eb"
                     offColor="#9ca3af"
-                    checkedIcon={false}
-                    uncheckedIcon={false}
                     height={22}
                     width={46}
                   />
@@ -492,103 +512,60 @@ const handleParseRecipients = () => {
                 {!autoDelay ? (
                   <>
                     <label>Delay (ms)</label>
-
-                    <Input
-                      value={delay}
-                      onChange={(e) => setDelay(e.target.value)}
-                      placeholder="500"
-                    />
+                    <Input value={delay} onChange={(e) => setDelay(e.target.value)} placeholder="500" />
                   </>
                 ) : (
                   <>
                     <label>Minimum Delay (Minutes)</label>
-
-                    <Input
-                      value={minDelay}
-                      onChange={(e) => setMinDelay(e.target.value)}
-                      placeholder="1"
-                    />
-
+                    <Input value={minDelay} onChange={(e) => setMinDelay(e.target.value)} placeholder="1" />
                     <label>Maximum Delay (Minutes)</label>
-
-                    <Input
-                      value={maxDelay}
-                      onChange={(e) => setMaxDelay(e.target.value)}
-                      placeholder="2"
-                    />
+                    <Input value={maxDelay} onChange={(e) => setMaxDelay(e.target.value)} placeholder="2" />
                   </>
                 )}
-
               </CardContent>
             </Card>
           </div>
 
-          {/* Right Panel - Status */}
+          {/* Status Panel */}
           <div className="lg:col-span-1">
-            <Card className="sticky top-20 lg:top-24 animate-slideInRight">
-              <CardHeader className="pb-4 sm:pb-6">
-                <CardTitle className="text-lg sm:text-xl">Status</CardTitle>
+            <Card className="sticky top-20 lg:top-24">
+              <CardHeader>
+                <CardTitle>Status</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex flex-col sm:flex-row lg:flex-col gap-2">
-                  <Button
-                    onClick={handleStartSending}
-                    disabled={isSending }
-                    className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 text-sm"
-                  >
-                    <Send className="w-4 h-4 mr-2" />
-                    Start
+                <div className="flex gap-2">
+                  <Button onClick={handleStartSending} disabled={isSending} className="flex-1">
+                    <Send className="w-4 h-4 mr-2" /> Start
                   </Button>
-                  <Button
-                    onClick={handleStop}
-                    disabled={!isSending}
-                    variant="outline"
-                    className="flex-1 transition-all duration-200 text-sm bg-transparent"
-                  >
-                    <Pause className="w-4 h-4 mr-2" />
-                    Stop
+                  <Button onClick={handleStop} disabled={!isSending} variant="outline" className="flex-1">
+                    <Pause className="w-4 h-4 mr-2" /> Stop
                   </Button>
                 </div>
 
-                <Button
-                  onClick={handleClear}
-                  variant="outline"
-                  className="w-full transition-all duration-200 text-sm bg-transparent"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Clear
+                <Button onClick={handleClear} variant="outline" className="w-full">
+                  <Trash2 className="w-4 h-4 mr-2" /> Clear
                 </Button>
 
                 {isComplete && (
-                  <div className="p-3 sm:p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-900/50 rounded-lg animate-slideInLeft">
-                    <p className="text-xs sm:text-sm font-medium text-green-900 dark:text-green-200">Completed</p>
-                    <p className="text-xs text-green-800 dark:text-green-300 mt-1">
-                      {successCount} sent, {errorCount} failed
-                    </p>
+                  <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 rounded-lg">
+                    <p className="font-medium text-green-700">Completed</p>
+                    <p className="text-sm">{successCount} sent, {errorCount} failed</p>
                   </div>
                 )}
 
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {statuses.map((status, idx) => (
-                    <div key={idx} className="text-xs p-2 sm:p-3 bg-muted rounded-lg">
+                    <div key={idx} className="text-xs p-3 bg-muted rounded-lg">
                       <div className="flex items-start gap-2">
-                        {status.status === "sent" && (
-                          <CheckCircle2 className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                        )}
-                        {status.status === "error" && (
-                          <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                        )}
+                        {status.status === "sent" && <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5" />}
+                        {status.status === "error" && <AlertCircle className="w-4 h-4 text-red-600 mt-0.5" />}
                         {(status.status === "sending" || status.status === "pending") && (
-                          <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin flex-shrink-0 mt-0.5" />
+                          <div className="w-4 h-4 rounded-full border-2 border-primary border-t-transparent animate-spin mt-0.5" />
                         )}
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium truncate">
-  {typeof status.email === "string"
-    ? status.email
-    : status.email?.email || "unknown"}
-</p>
+                          <p className="font-medium truncate">{status.email}</p>
                           <p className="text-muted-foreground capitalize">{status.status}</p>
-                          {status.message && <p className="text-red-600 dark:text-red-400 mt-0.5">{status.message}</p>}
+                          {status.message && <p className="text-red-600">{status.message}</p>}
                         </div>
                       </div>
                     </div>
@@ -599,6 +576,53 @@ const handleParseRecipients = () => {
           </div>
         </div>
       </div>
+
+      {/* CSV Preview Modal */}
+      {showCsvPreview && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-900 rounded-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b">
+              <h3 className="text-xl font-semibold">CSV Preview</h3>
+              <p className="text-sm text-muted-foreground">{csvPreviewData.length} recipients found</p>
+            </div>
+
+            <div className="p-6 overflow-auto flex-1">
+              <table className="w-full text-sm">
+                <thead className="bg-muted sticky top-0">
+                  <tr>
+                    <th className="p-3 text-left">Name</th>
+                    <th className="p-3 text-left">Email</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {csvPreviewData.map((recipient, idx) => (
+                    <tr key={idx}>
+                      <td className="p-3">{recipient.name}</td>
+                      <td className="p-3 font-mono">{recipient.email}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="p-6 border-t flex gap-3">
+              <Button variant="outline" onClick={() => setShowCsvPreview(false)} className="flex-1">Cancel</Button>
+              <Button
+                onClick={() => {
+                  setRecipientText(tempCsvText)
+                  const parsed = parseRecipients(tempCsvText)
+                  setRecipients(parsed)
+                  setStatuses(parsed.map((r, i) => ({ index: i, email: r.email, status: "pending" })))
+                  setShowCsvPreview(false)
+                }}
+                className="flex-1"
+              >
+                Import {csvPreviewData.length} Recipients
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
