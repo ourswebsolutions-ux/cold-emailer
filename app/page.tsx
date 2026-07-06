@@ -100,8 +100,9 @@ export default function Home() {
             Cold Email Sender
           </h1>
           <p className="text-base sm:text-lg md:text-xl text-muted-foreground mb-6 sm:mb-8 max-w-2xl mx-auto leading-relaxed px-2">
-            Powered by <span className="font-semibold text-primary">Axoraweb Solutions</span>. Send bulk emails with
-            optional attachments. No database, no persistence. Perfect for testing.
+           Powered by <span className="font-semibold text-primary"> AxoraWeb Solutions.</span>.
+         An AI-powered automated email system built for <span className="font-semibold text-primary"> speed</span>, intelligence, and precision.
+Send powerful, smartly optimized emails with optional attachments and seamless delivery <span className="font-semibold text-primary"> automation</span>.
           </p>
         </div>
 

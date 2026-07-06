@@ -422,8 +422,9 @@ export default function SendPage() {
                 <Textarea
                   value={recipientText}
                   onChange={(e) => setRecipientText(e.target.value)}
-                  placeholder="John Doe,john@example.com&#10;Jane Smith,jane@example.com"
-                  rows={6}
+                  placeholder="name,email1@example.com&#10;name,email2@example.com&#10;name,email3@example.com"
+                  rows={4}
+                  className="text-sm"
                 />
                 <Button onClick={handleParseRecipients} variant="outline" className="w-full">
                   Parse Recipients ({recipients.length})
