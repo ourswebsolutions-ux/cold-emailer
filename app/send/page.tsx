@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { AlertCircle, CheckCircle2, Send, Trash2, Pause } from "lucide-react"
+import { AlertCircle, CheckCircle2, Send, Trash2, Pause, Upload } from "lucide-react"
 import dynamic from "next/dynamic"
 import "react-quill-new/dist/quill.snow.css"
 
@@ -90,17 +90,17 @@ export default function SendPage() {
 
   const [userId, setUserId] = useState<string>("");
 
+  // NEW: Ref for CSV file input
+  const csvFileInputRef = useRef<HTMLInputElement>(null);
 
-useEffect(() => {
-  const user = localStorage.getItem("user");
-    // alert(user)
-
-  if (user) {
-    const parsedUser = JSON.parse(user);
-    console.log(parsedUser?.id)
-    setUserId(parsedUser?.id);
-  }
-}, []);  
+  useEffect(() => {
+    const user = localStorage.getItem("user");
+    if (user) {
+      const parsedUser = JSON.parse(user);
+      console.log(parsedUser?.id)
+      setUserId(parsedUser?.id);
+    }
+  }, []);  
 
 
   // Fetch active SMTP account
@@ -174,11 +174,85 @@ const isEmailFor = (str: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str);
   return recipients;
 };
 
-// Helper
+// NEW: CSV Import Handler
+const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
 
+  if (!file.name.toLowerCase().endsWith('.csv')) {
+    alert("Please select a valid CSV file.");
+    return;
+  }
 
-const handleParseRecipients = () => {
-  const parsed = parseRecipients(recipientText);
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const csvText = event.target?.result as string;
+    if (!csvText) return;
+
+    processCsvData(csvText);
+  };
+  reader.readAsText(file);
+
+  // Reset input so same file can be selected again
+  e.target.value = "";
+};
+
+const processCsvData = (csvText: string) => {
+  const lines = csvText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const recipientLines: string[] = [];
+  let validCount = 0;
+
+  for (const line of lines) {
+    const columns = line.split(',').map((col) => col.trim());
+    if (columns.length === 0) continue;
+
+    let name = "";
+    let email = "";
+
+    // Handle possible header or single-column rows
+    if (columns[0].toLowerCase() === "name" && columns[1]?.toLowerCase() === "email") {
+      continue; // Skip header
+    }
+
+    if (columns.length >= 2) {
+      name = columns[0];
+      email = columns[1];
+    } else if (columns.length === 1) {
+      email = columns[0];
+    }
+
+    if (!isEmailFor(email)) {
+      // Try swapping if first looks like email
+      if (isEmailFor(name)) {
+        email = name;
+        name = columns[1] || email.split("@")[0];
+      } else {
+        continue; // Skip invalid row
+      }
+    }
+
+    if (!name) {
+      name = email.split("@")[0];
+    }
+
+    recipientLines.push(`${name},${email}`);
+    validCount++;
+  }
+
+  if (validCount === 0) {
+    alert("No valid recipients found in the CSV file.");
+    return;
+  }
+
+  const newRecipientText = recipientLines.join("\n");
+  setRecipientText(newRecipientText);
+
+  // Automatically trigger existing parsing logic
+  const parsed = parseRecipients(newRecipientText);
   setRecipients(parsed);
   setStatuses(
     parsed.map((recipient, index) => ({
@@ -188,10 +262,26 @@ const handleParseRecipients = () => {
     }))
   );
 
-  if (parsed.length === 0 && recipientText.trim()) {
-    alert("No valid recipients found. Use format: name,email or one email per line.");
+  if (parsed.length === 0) {
+    alert("No valid recipients found after parsing CSV.");
   }
 };
+
+  const handleParseRecipients = () => {
+    const parsed = parseRecipients(recipientText);
+    setRecipients(parsed);
+    setStatuses(
+      parsed.map((recipient, index) => ({
+        index,
+        email: recipient.email,
+        status: "pending",
+      }))
+    );
+
+    if (parsed.length === 0 && recipientText.trim()) {
+      alert("No valid recipients found. Use format: name,email or one email per line.");
+    }
+  };
 
   const handleSingleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
@@ -382,11 +472,23 @@ const handleParseRecipients = () => {
             </Card>
 
             <Card className="animate-slideInLeft">
-              <CardHeader className="pb-4 sm:pb-6">
-                <CardTitle className="text-lg sm:text-xl">Recipients</CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Paste emails one per line or comma-separated
-                </CardDescription>
+              {/* Updated CardHeader with Import button */}
+              <CardHeader className="pb-4 sm:pb-6 flex flex-row items-start justify-between">
+                <div>
+                  <CardTitle className="text-lg sm:text-xl">Recipients</CardTitle>
+                  <CardDescription className="text-xs sm:text-sm">
+                    Paste emails one per line or comma-separated
+                  </CardDescription>
+                </div>
+                <Button
+                  onClick={() => csvFileInputRef.current?.click()}
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-2 text-xs sm:text-sm"
+                >
+                  <Upload className="w-4 h-4" />
+                  Import
+                </Button>
               </CardHeader>
               <CardContent className="space-y-4">
                 <Textarea
@@ -403,6 +505,15 @@ const handleParseRecipients = () => {
                 >
                   Parse Recipients ({recipients.length})
                 </Button>
+
+                {/* Hidden CSV file input */}
+                <input
+                  ref={csvFileInputRef}
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCsvImport}
+                  className="hidden"
+                />
               </CardContent>
             </Card>
 
