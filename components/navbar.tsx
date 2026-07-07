@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { LogIn, LogOut, Phone, Lock, Shield, Zap, Award, X } from "lucide-react";
+import { LogIn, LogOut, Phone, Lock, Shield, Zap, X } from "lucide-react";
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -90,19 +90,9 @@ export default function Navbar() {
   }
 
   function logout() {
-    // Clear ALL storage and cached data
     try {
-      // Clear specific keys
-      localStorage.removeItem("phone");
-      localStorage.removeItem("user");
-      
-      // Clear everything in localStorage
       localStorage.clear();
-
-      // Clear sessionStorage as well
       sessionStorage.clear();
-
-      // Optional: Clear cookies (if any auth cookies exist)
       document.cookie.split(";").forEach((c) => {
         document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
       });
@@ -110,7 +100,6 @@ export default function Navbar() {
       console.error("Error clearing storage:", e);
     }
 
-    // Reset all component states
     setLoggedIn(false);
     setUserPhone("");
     setPhone("");
@@ -138,7 +127,7 @@ export default function Navbar() {
               href="/"
               className="flex items-center gap-2 sm:gap-3 font-bold text-lg sm:text-xl text-primary hover:text-primary/80 transition-colors flex-shrink-0"
             >
-              <img src="/logo.png" className="h-30 w-auto" alt="Logo" />
+              <img src="/logo.png" className="h-16 sm:h-12 md:-ml-12 md:h-24 w-auto" alt="Logo" />
             </Link>
 
             <div className="hidden sm:flex gap-6 lg:gap-8">
@@ -191,6 +180,7 @@ export default function Navbar() {
             </button>
           </div>
 
+          {/* Mobile Menu */}
           {isOpen && (
             <div className="sm:hidden pb-6 pt-2 border-t border-gray-100 dark:border-gray-800 space-y-1">
               <Link href="/env" onClick={() => setIsOpen(false)} className="block px-4 py-3 rounded-xl text-foreground hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
@@ -205,18 +195,12 @@ export default function Navbar() {
                   <div className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 border-t border-gray-100 dark:border-gray-800 mt-2">
                     {userPhone}
                   </div>
-                  <button 
-                    onClick={() => { logout(); setIsOpen(false); }} 
-                    className="w-full text-left px-4 py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white transition-colors"
-                  >
+                  <button onClick={() => { logout(); setIsOpen(false); }} className="w-full text-left px-4 py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white transition-colors">
                     Logout
                   </button>
                 </>
               ) : (
-                <button 
-                  onClick={() => { setIsOpen(false); openLogin(); }} 
-                  className="w-full px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors mt-2"
-                >
+                <button onClick={() => { setIsOpen(false); openLogin(); }} className="w-full px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors mt-2">
                   Login
                 </button>
               )}
@@ -225,30 +209,26 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* Login Modal */}
+      {/* Responsive Auth Modal */}
       {showAuthModal && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-xl p-4">
-          <div className="w-full max-w-5xl rounded-3xl overflow-hidden shadow-2xl flex flex-col lg:flex-row h-[92vh] lg:h-auto max-h-[95vh] relative">
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 backdrop-blur-xl p-3 sm:p-4">
+          <div className="w-full max-w-4xl lg:max-w-5xl rounded-3xl overflow-hidden shadow-2xl flex flex-col lg:flex-row max-h-[95vh] lg:h-auto relative">
             
             {/* Left Panel - Important Notice */}
-            <div className="lg:w-5/12 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-8 lg:p-12 flex flex-col">
-              <div className="relative z-10 flex flex-col h-full">
-                <div className="mb-12">
-                  <h2 className="text-white text-3xl font-semibold mb-6">Important Notice</h2>
-                  <div className="text-white/90 leading-relaxed space-y-6 text-[15px]">
-                    <p>
-                      Login only using the same WhatsApp number that was used to purchase your license.
-                    </p>
+            <div className="lg:w-5/12 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-6 sm:p-8 lg:p-12 flex flex-col order-2 lg:order-1">
+              <div className="flex flex-col h-full">
+                <div className="mb-8 lg:mb-12">
+                  <h2 className="text-white text-2xl sm:text-3xl font-semibold mb-6">Important Notice</h2>
+                  <div className="text-white/90 leading-relaxed space-y-5 text-[15px]">
+                    <p>Login only using the same WhatsApp number that was used to purchase your license.</p>
                     <p className="font-medium border-l-4 border-rose-500 pl-4">
                       Logging in with another WhatsApp number may result in your account being suspended or permanently deleted.
                     </p>
-                    <p>
-                      If you need to change your registered WhatsApp number, please contact support before logging in.
-                    </p>
+                    <p>If you need to change your registered WhatsApp number, please contact support before logging in.</p>
                   </div>
                 </div>
 
-                <div className="mt-auto space-y-6">
+                <div className="mt-auto space-y-6 hidden lg:block">
                   <div className="flex items-start gap-4">
                     <Shield className="w-6 h-6 text-emerald-400 mt-0.5" />
                     <div className="text-sm text-white/70">Enterprise Security</div>
@@ -262,19 +242,20 @@ export default function Navbar() {
             </div>
 
             {/* Right Side - Auth Form */}
-            <div className="lg:w-7/12 bg-white dark:bg-slate-900 p-8 lg:p-12 flex flex-col relative">
+            <div className="lg:w-7/12 bg-white dark:bg-slate-900 p-6 sm:p-8 lg:p-12 flex flex-col relative order-1 lg:order-2">
+              {/* Close Button */}
               <button
                 onClick={() => setShowAuthModal(false)}
-                className="absolute top-6 right-6 w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors z-20"
+                className="absolute top-4 right-4 sm:top-6 sm:right-6 w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors z-20"
               >
                 <X className="w-6 h-6" />
               </button>
 
-              <div className="flex-1 flex flex-col justify-center max-w-md mx-auto w-full">
-                <h2 className="text-4xl font-semibold text-slate-900 dark:text-white mb-2 text-center">
+              <div className="flex-1 flex flex-col justify-center max-w-md mx-auto w-full pt-4 lg:pt-0">
+                <h2 className="text-3xl sm:text-4xl font-semibold text-slate-900 dark:text-white mb-2 text-center">
                   {isCreating ? "Create Test Account" : "Sign In"}
                 </h2>
-                <p className="text-slate-500 dark:text-slate-400 text-center mb-10">
+                <p className="text-slate-500 dark:text-slate-400 text-center mb-8 sm:mb-10 text-sm sm:text-base">
                   {isCreating ? "Create a temporary test account" : "Access your dashboard"}
                 </p>
 
@@ -288,7 +269,7 @@ export default function Navbar() {
                         placeholder="+923001234567"
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
-                        className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:border-blue-500 text-lg"
+                        className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:border-blue-500 text-base sm:text-lg"
                       />
                     </div>
                   </div>
@@ -302,7 +283,7 @@ export default function Navbar() {
                         placeholder="Enter your password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:border-blue-500 text-lg"
+                        className="w-full pl-12 pr-4 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl focus:outline-none focus:border-blue-500 text-base sm:text-lg"
                       />
                     </div>
                   </div>
