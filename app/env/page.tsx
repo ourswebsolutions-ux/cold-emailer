@@ -303,10 +303,77 @@ export default function EnvPage() {
                 )}
 
                 <div className="mt-6 pt-6 border-t border-border">
-                  <p className="text-xs text-muted-foreground">
-                    Click radio button to make an account active. Active account is used for sending emails.
-                  </p>
-                </div>
+  <div className="space-y-4">
+    <h3 className="text-sm font-semibold text-foreground">
+      SMTP Configuration Guide
+    </h3>
+
+    <ol className="text-xs text-muted-foreground space-y-3 list-decimal list-inside">
+      <li>
+        <strong className="text-foreground">SMTP Host:</strong> Enter{" "}
+        <code className="px-1 py-0.5 bg-muted rounded">smtp.gmail.com</code>
+      </li>
+
+      <li>
+        <strong className="text-foreground">SMTP Port:</strong> Use port{" "}
+        <code className="px-1 py-0.5 bg-muted rounded">587</code>
+      </li>
+
+      <li>
+        <strong className="text-foreground">Username / Email:</strong> Enter
+        your Gmail account email address (example: yourname@gmail.com)
+      </li>
+
+      <li>
+        <strong className="text-foreground">Password / App Password:</strong>{" "}
+        Use a Gmail App Password instead of your normal Gmail password.
+        <br />
+        To create an App Password:
+        <ul className="mt-2 ml-5 list-disc space-y-1">
+          <li>
+            Open your Google Account:
+            <span className="text-foreground"> Manage your Google Account</span>
+          </li>
+          <li>
+            Go to <span className="text-foreground">Security</span>
+          </li>
+          <li>
+            Enable <span className="text-foreground">2-Step Verification</span>{" "}
+            (required)
+          </li>
+          <li>
+            Open{" "}
+            <span className="text-foreground">
+              App Passwords
+            </span>
+          </li>
+          <li>
+            Create a new app password (select Mail or Other)
+          </li>
+          <li>
+            Copy the generated 16-character password and paste it here
+          </li>
+        </ul>
+      </li>
+
+      <li>
+        <strong className="text-foreground">Sender Email:</strong> Use the same
+        Gmail address you configured above.
+      </li>
+
+      <li>
+        <strong className="text-foreground">Sender Name:</strong> Enter your
+        preferred display name (example: Your Company Name or Your Name).
+      </li>
+
+      <li>
+        <strong className="text-foreground">Activate Account:</strong> After
+        saving the SMTP account, click the radio button next to the account to
+        make it active. The active account will be used for sending emails.
+      </li>
+    </ol>
+  </div>
+</div>
               </CardContent>
             </Card>
           </div>
