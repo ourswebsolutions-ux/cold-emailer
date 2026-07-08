@@ -5,6 +5,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Switch } from "@/components/ui/switch"
 import { AlertCircle, CheckCircle2, Loader2, Trash2 } from "lucide-react"
 
 interface SystemAccount {
@@ -32,15 +33,13 @@ export default function SystemEmailConfigPage() {
   const [testStatus, setTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle")
   const [testMessage, setTestMessage] = useState("")
   const [saveMessage, setSaveMessage] = useState("")
-  const [isLoadingConfig, setIsLoadingConfig] = useState(false)
   const [isLoadingAccounts, setIsLoadingAccounts] = useState(false)
 
-  // Real userId from auth (cookie)
   const [userId, setUserId] = useState<string | null>(null)
   const [systemAccounts, setSystemAccounts] = useState<SystemAccount[]>([])
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
 
-  // Get logged-in userId from cookie (set during login)
+  // Get logged-in userId from cookie
   useEffect(() => {
     const getUserIdFromCookie = () => {
       const cookies = document.cookie.split("; ")
@@ -52,11 +51,10 @@ export default function SystemEmailConfigPage() {
         console.warn("No userId cookie found. Please login.")
       }
     }
-
     getUserIdFromCookie()
   }, [])
 
-  // Fetch all system email accounts for current user
+  // Fetch all system email accounts
   const fetchSystemAccounts = async () => {
     if (!userId) return
 
@@ -88,7 +86,7 @@ export default function SystemEmailConfigPage() {
     setConfig((prev) => ({ ...prev, [name]: value }))
   }
 
-  // Always create NEW account
+  // Create new account
   const handleSave = async () => {
     if (!userId) {
       setSaveMessage("Please login first")
@@ -133,7 +131,6 @@ export default function SystemEmailConfigPage() {
           senderName: "",
         })
 
-        // Refresh list
         await fetchSystemAccounts()
       } else {
         setSaveMessage(result.message || "Failed to create account")
@@ -186,23 +183,31 @@ export default function SystemEmailConfigPage() {
     setTimeout(() => setTestStatus("idle"), 5000)
   }
 
-  const handleActivate = async (id: string) => {
+  // Toggle active status (supports multiple active accounts)
+  const handleToggleActive = async (id: string, currentActive: boolean) => {
     if (!userId) return
 
     try {
       const response = await fetch("/api/system-config/activate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, userId }),
+        body: JSON.stringify({ 
+          id, 
+          userId,
+          isActive: !currentActive 
+        }),
       })
 
       const result = await response.json()
 
       if (result.success) {
         await fetchSystemAccounts()
+      } else {
+        alert(result.message || "Failed to update status")
       }
     } catch (error) {
-      console.error("Failed to activate account:", error)
+      console.error("Failed to toggle account:", error)
+      alert("Failed to update account status")
     }
   }
 
@@ -243,7 +248,7 @@ export default function SystemEmailConfigPage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* LEFT COLUMN - Saved System Email Accounts */}
+          {/* LEFT COLUMN - Saved Accounts */}
           <div className="lg:col-span-1">
             <Card className="rounded-2xl shadow-lg border border-border/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl h-full">
               <CardHeader>
@@ -252,7 +257,7 @@ export default function SystemEmailConfigPage() {
                   {isLoadingAccounts && <Loader2 className="w-4 h-4 animate-spin" />}
                 </CardTitle>
                 <CardDescription>
-                  Select active system email account for application notifications.
+                  Toggle multiple accounts ON (TRUE) / OFF (FALSE)
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -265,35 +270,45 @@ export default function SystemEmailConfigPage() {
                     No system email accounts yet. Create one below.
                   </p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {systemAccounts.map((account) => (
                       <div
                         key={account.id}
-                        className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-200 group ${
+                        className={`flex items-center justify-between px-4 py-4 rounded-xl border transition-all duration-200 group ${
                           account.isActive 
-                            ? "border-primary bg-primary/5" 
-                            : "border-transparent hover:border-border hover:bg-muted/50"
+                            ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30" 
+                            : "border-border hover:border-border hover:bg-muted/50"
                         }`}
                       >
-                        <input
-                          type="radio"
-                          name="systemAccount"
-                          checked={account.isActive}
-                          onChange={() => handleActivate(account.id)}
-                          className="w-4 h-4 accent-primary cursor-pointer"
-                        />
                         <div className="flex-1 min-w-0">
                           <p className="font-medium text-sm text-foreground truncate">{account.senderEmail}</p>
                           {account.senderName && (
                             <p className="text-xs text-muted-foreground truncate">{account.senderName}</p>
                           )}
                         </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className={`text-xs font-mono font-medium px-2.5 py-1 rounded-full border ${
+                            account.isActive 
+                              ? "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900 dark:text-emerald-300" 
+                              : "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400"
+                          }`}>
+                            {account.isActive ? "TRUE" : "FALSE"}
+                          </div>
+
+                          <Switch
+                            checked={account.isActive}
+                            onCheckedChange={() => handleToggleActive(account.id, account.isActive)}
+                            className="data-[state=checked]:bg-emerald-600"
+                          />
+                        </div>
+
                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => handleDelete(account.id)}
                           disabled={isDeleting === account.id}
-                          className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-600 hover:bg-red-100/50"
+                          className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-600 hover:bg-red-100/50 ml-2"
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
@@ -307,43 +322,14 @@ export default function SystemEmailConfigPage() {
                     <h3 className="text-sm font-semibold text-foreground">
                       System Email Configuration Guide
                     </h3>
-
                     <ol className="text-xs text-muted-foreground space-y-3 list-decimal list-inside">
-                      <li>
-                        <strong className="text-foreground">SMTP Host:</strong> Enter{" "}
-                        <code className="px-1 py-0.5 bg-muted rounded">smtp.gmail.com</code>
-                      </li>
-
-                      <li>
-                        <strong className="text-foreground">SMTP Port:</strong> Use port{" "}
-                        <code className="px-1 py-0.5 bg-muted rounded">587</code>
-                      </li>
-
-                      <li>
-                        <strong className="text-foreground">Username / Email:</strong> Enter
-                        your email account address
-                      </li>
-
-                      <li>
-                        <strong className="text-foreground">Password / App Password:</strong>{" "}
-                        Use an App Password when required by your provider.
-                      </li>
-
-                      <li>
-                        <strong className="text-foreground">Sender Email:</strong> Use the same
-                        email address you configured above.
-                      </li>
-
-                      <li>
-                        <strong className="text-foreground">Sender Name:</strong> Enter your
-                        preferred display name (example: Your Company Name or Your Name).
-                      </li>
-
-                      <li>
-                        <strong className="text-foreground">Activate Account:</strong> After
-                        saving the system email account, click the radio button next to the account to
-                        make it active. The active account will be used for sending system notifications.
-                      </li>
+                      <li><strong>SMTP Host:</strong> e.g. <code className="px-1 py-0.5 bg-muted rounded">smtp.gmail.com</code></li>
+                      <li><strong>SMTP Port:</strong> Usually <code className="px-1 py-0.5 bg-muted rounded">587</code></li>
+                      <li><strong>Username / Email:</strong> Your email address</li>
+                      <li><strong>Password:</strong> Use App Password if required</li>
+                      <li><strong>Sender Email:</strong> Same as above</li>
+                      <li><strong>Sender Name:</strong> Optional display name</li>
+                      <li><strong>Active (TRUE):</strong> Toggle to enable account for sending emails</li>
                     </ol>
                   </div>
                 </div>
@@ -351,49 +337,46 @@ export default function SystemEmailConfigPage() {
             </Card>
           </div>
 
-          {/* RIGHT COLUMN - System Email Settings Form */}
+          {/* RIGHT COLUMN - Add New Account */}
           <div className="lg:col-span-2 space-y-6">
             <Card className="rounded-2xl shadow-lg border border-border/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl">
               <CardHeader className="pb-6">
-                <CardTitle className="text-xl flex items-center gap-2">
-                  Add New System Email Account
-                  {isLoadingConfig && <Loader2 className="w-4 h-4 animate-spin" />}
-                </CardTitle>
+                <CardTitle className="text-xl">Add New System Email Account</CardTitle>
                 <CardDescription>
-                  Fill the form and click Save to create a new account. Previous accounts are preserved.
+                  Fill the form and click Save. Multiple accounts can be active.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">SMTP Host</label>
-                    <Input name="host" value={config.host} onChange={handleChange} placeholder="smtp.gmail.com" className="w-full" />
+                    <Input name="host" value={config.host} onChange={handleChange} placeholder="smtp.gmail.com" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">SMTP Port</label>
-                    <Input name="port" value={config.port} onChange={handleChange} placeholder="587" className="w-full" />
+                    <Input name="port" value={config.port} onChange={handleChange} placeholder="587" />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">Username / Email</label>
-                    <Input name="username" value={config.username} onChange={handleChange} placeholder="your@email.com" className="w-full" />
+                    <Input name="username" value={config.username} onChange={handleChange} placeholder="your@email.com" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">Password / App Password</label>
-                    <Input name="password" type="password" value={config.password} onChange={handleChange} placeholder="••••••••" className="w-full" />
+                    <Input name="password" type="password" value={config.password} onChange={handleChange} placeholder="••••••••" />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">Sender Email</label>
-                    <Input name="senderEmail" value={config.senderEmail} onChange={handleChange} placeholder="sender@example.com" className="w-full" />
+                    <Input name="senderEmail" value={config.senderEmail} onChange={handleChange} placeholder="sender@example.com" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-foreground mb-2">Sender Name (Optional)</label>
-                    <Input name="senderName" value={config.senderName} onChange={handleChange} placeholder="John Doe" className="w-full" />
+                    <Input name="senderName" value={config.senderName} onChange={handleChange} placeholder="John Doe" />
                   </div>
                 </div>
               </CardContent>
@@ -403,7 +386,7 @@ export default function SystemEmailConfigPage() {
               <Button
                 onClick={handleSave}
                 disabled={!userId}
-                className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 py-6 rounded-2xl text-base font-medium"
+                className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground py-6 rounded-2xl text-base font-medium"
               >
                 Save New System Email Account
               </Button>
@@ -411,7 +394,7 @@ export default function SystemEmailConfigPage() {
                 onClick={handleTestSMTP}
                 variant="outline"
                 disabled={testStatus === "testing" || !userId}
-                className="flex-1 transition-all duration-200 py-6 rounded-2xl text-base font-medium border-2 hover:bg-muted"
+                className="flex-1 py-6 rounded-2xl text-base font-medium border-2 hover:bg-muted"
               >
                 {testStatus === "testing" && <Loader2 className="w-5 h-5 mr-2 animate-spin" />}
                 Test Connection
@@ -426,32 +409,27 @@ export default function SystemEmailConfigPage() {
             )}
 
             {testStatus !== "idle" && (
-              <Card className={testStatus === "success" ? "border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-900/20 rounded-2xl" : "border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 rounded-2xl"}>
+              <Card className={testStatus === "success" ? "border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-900/20" : "border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20"}>
                 <CardContent className="pt-6 flex items-start gap-3">
                   {testStatus === "success" ? (
                     <CheckCircle2 className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
                   ) : (
                     <AlertCircle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
                   )}
-                  <div>
-                    <p className={testStatus === "success" ? "text-green-800 dark:text-green-300 font-medium" : "text-red-800 dark:text-red-300 font-medium"}>
-                      {testMessage}
-                    </p>
-                  </div>
+                  <p className={testStatus === "success" ? "text-green-800 dark:text-green-300 font-medium" : "text-red-800 dark:text-red-300 font-medium"}>
+                    {testMessage}
+                  </p>
                 </CardContent>
               </Card>
             )}
 
             <Card className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900/50 rounded-2xl">
-              <CardHeader className="pb-">
+              <CardHeader>
                 <CardTitle className="text-amber-900 dark:text-amber-200 text-lg">Security Notice</CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-amber-800 dark:text-amber-300 space-y-3">
-                <p>This software is built with security and reliability as a top priority and is intended for legitimate and authorized use only. It follows industry-standard practices to ensure safe and responsible operation.</p>
-
-                <p>All sensitive information for system email accounts is handled securely and stored using protected database systems with appropriate security measures in place.</p>
-
-                <p>We are committed to maintaining user privacy, data protection, and system integrity at all times.</p>
+                <p>This software is built with security and reliability as a top priority.</p>
+                <p>All sensitive information is handled securely and stored with appropriate protections.</p>
               </CardContent>
             </Card>
           </div>

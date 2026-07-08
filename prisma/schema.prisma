@@ -20,6 +20,7 @@ model User {
   updatedAt         DateTime       @updatedAt
   smtpConfigs       SMTPConfig[]
   systemConfig      SystemConfig[]
+  emailTemplates EmailTemplate[]
 }
 
 model SMTPConfig {
@@ -80,4 +81,20 @@ enum UserRole {
 enum UserStatus {
   ACTIVE
   DISABLED
+}
+
+
+model EmailTemplate {
+  id        String   @id @default(cuid())
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  subject   String
+  body      LongText
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }

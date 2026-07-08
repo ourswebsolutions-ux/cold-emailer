@@ -1,71 +1,150 @@
 import Imap from "imap";
 import { simpleParser } from "mailparser";
+import dns from "node:dns/promises";
 
 
-export function createIMAPConnection(config: {
-  host: string;
-  port: number;
-  username: string;
-  password: string;
-}) {
+async function resolveGmailIMAP() {
+
+  try {
+
+    const result = await dns.lookup(
+      "imap.gmail.com",
+      {
+        family:4
+      }
+    );
+
+    console.log(
+      "✅ Gmail IP:",
+      result.address
+    );
+
+    return result.address;
 
 
-  return new Imap({
+  } catch(error){
 
-    user: config.username,
+    console.log(
+      "⚠️ DNS failed using fallback"
+    );
 
-    password: config.password,
+    return "74.125.68.109";
 
-    host: config.host,
-
-    port: config.port,
-
-    tls: true,
-
-    family: 4,
-
-    tlsOptions: {
-      rejectUnauthorized: false
-    }
-
-  });
+  }
 
 }
 
 
 
-export function readInbox(config:any) {
+export async function createIMAPConnection(config:any){
 
 
-  return new Promise<any[]>((resolve,reject)=>{
+  const ip = await resolveGmailIMAP();
 
 
-    const imap = createIMAPConnection(config);
+  console.log(
+    "🚀 Creating IMAP",
+    {
+      ip,
+      user:config.username
+    }
+  );
 
 
-    const emails:any[] = [];
+  const imap = new Imap({
+
+    user:config.username,
+
+    password:config.password,
+
+    host:ip,
+
+    port:993,
+
+    tls:true,
+
+    tlsOptions:{
+      servername:"imap.gmail.com",
+      rejectUnauthorized:true
+    },
+
+    connTimeout:30000,
+
+    authTimeout:60000
+
+  });
 
 
-    imap.once("ready",()=>{
+
+  imap.on(
+    "ready",
+    ()=>{
+      console.log(
+        "✅ IMAP READY"
+      );
+    }
+  );
 
 
-      imap.openBox(
-        "INBOX",
-        false,
-        (err)=>{
+  imap.on(
+    "error",
+    err=>{
+      console.log(
+        "❌ IMAP ERROR",
+        err
+      );
+    }
+  );
 
 
-          if(err){
-            reject(err);
-            return;
-          }
+  imap.on(
+    "end",
+    ()=>{
+      console.log(
+        "🔚 IMAP CLOSED"
+      );
+    }
+  );
 
 
-          imap.search(
-            [
-              "UNSEEN"
-            ],
-            (err,results)=>{
+  return imap;
+
+}
+
+
+
+
+
+export async function readInbox(config:any){
+
+
+  console.log(
+    "📥 Reading inbox"
+  );
+
+
+  const imap =
+    await createIMAPConnection(config);
+
+
+
+  return new Promise<any[]>(
+    (resolve,reject)=>{
+
+
+      const emails:any[]=[];
+
+
+
+      imap.once(
+        "ready",
+        ()=>{
+
+
+          imap.openBox(
+            "INBOX",
+            false,
+            (err)=>{
 
 
               if(err){
@@ -74,44 +153,96 @@ export function readInbox(config:any) {
               }
 
 
-              if(!results.length){
 
-                imap.end();
-
-                resolve([]);
-
-                return;
-
-              }
+              console.log(
+                "🔎 Searching unread"
+              );
 
 
 
-              const fetch =
-                imap.fetch(results,{
-                  bodies:""
-                });
+              imap.search(
+                [
+                  "UNSEEN"
+                ],
+                (err,results)=>{
+
+
+                  if(err){
+                    reject(err);
+                    return;
+                  }
 
 
 
-              fetch.on(
-                "message",
-                (msg)=>{
+                  console.log(
+                    "Unread count:",
+                    results.length
+                  );
 
 
-                  msg.on(
-                    "body",
-                    (stream)=>{
+
+                  if(!results.length){
+
+                    imap.end();
+
+                    resolve([]);
+
+                    return;
+
+                  }
 
 
-                      simpleParser(
-                        stream,
-                        (err,mail)=>{
 
-                          if(!err){
+                  const uid =
+                    results[results.length-1];
+
+
+
+                  console.log(
+                    "📩 Latest UID:",
+                    uid
+                  );
+
+
+
+                  const fetch =
+                    imap.fetch(
+                      [uid],
+                      {
+                        bodies:""
+                      }
+                    );
+
+
+
+                  fetch.on(
+                    "message",
+                    msg=>{
+
+
+                      msg.on(
+                        "body",
+                        stream=>{
+
+
+                          simpleParser(
+                            stream
+                          )
+                          .then(mail=>{
+
+
+                            console.log(
+                              "📨 Parsed:",
+                              mail.subject
+                            );
+
 
                             emails.push(mail);
 
-                          }
+
+                          })
+                          .catch(console.log);
+
 
                         }
                       );
@@ -121,20 +252,41 @@ export function readInbox(config:any) {
                   );
 
 
+
+                  fetch.once(
+                    "end",
+                    ()=>{
+
+
+                      setTimeout(
+                        ()=>{
+
+
+                          console.log(
+                            "✅ Returning emails:",
+                            emails.length
+                          );
+
+
+                          imap.end();
+
+
+                          resolve(emails);
+
+
+                        },
+                        1000
+                      );
+
+
+                    }
+                  );
+
+
+
                 }
               );
 
-
-              fetch.once(
-                "end",
-                ()=>{
-
-                  imap.end();
-
-                  resolve(emails);
-
-                }
-              );
 
 
             }
@@ -145,19 +297,23 @@ export function readInbox(config:any) {
       );
 
 
-    });
+
+      imap.once(
+        "error",
+        reject
+      );
 
 
 
-    imap.once(
-      "error",
-      reject
-    );
+      console.log(
+        "🔗 Connecting..."
+      );
 
 
-    imap.connect();
+      imap.connect();
 
 
-  });
+    }
+  );
 
 }
