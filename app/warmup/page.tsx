@@ -178,7 +178,7 @@ const EmailWarmupPage: React.FC = () => {
                 </CardTitle>
                 <CardDescription className="text-base">
                   Manage your enrolled email accounts ({accounts.length})
-                  
+
                   <span className='block text-red-700'>This Feature is comming soon </span>
                 </CardDescription>
               </CardHeader>
@@ -290,7 +290,8 @@ const EmailWarmupPage: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-3">
-                          <Switch 
+                          <Switch
+                         className="data-[state=checked]:bg-blue-600 data-[state=unchecked]:bg-gray-300"
                             checked={config.warmup}
                             onCheckedChange={() => toggleWarmup(config.id, !config.warmup)}
                           />
