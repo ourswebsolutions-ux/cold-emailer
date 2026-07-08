@@ -42,6 +42,8 @@ model SMTPConfig {
   senderEmail String
   senderName String?
   isActive Boolean @default(false)
+  warmup Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
