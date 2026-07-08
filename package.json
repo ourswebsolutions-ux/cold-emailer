@@ -6,7 +6,9 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "worker": "tsx workers/warmup.worker.ts",
+     "reply-worker": "tsx workers/reply.worker.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -51,10 +53,12 @@
     "dotenv": "^17.4.2",
     "embla-carousel-react": "8.5.1",
     "eventsource": "^4.1.0",
+    "imap": "^0.8.19",
     "input-otp": "1.4.1",
     "jose": "^6.2.3",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.454.0",
+    "mailparser": "^3.9.14",
     "multer": "^2.2.0",
     "mysql2": "^3.22.5",
     "next": "16.0.0",

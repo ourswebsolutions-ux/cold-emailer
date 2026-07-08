@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, userId, warmup } = body;
+    const { id, userId } = body;
 
     if (!id || !userId) {
       return NextResponse.json(
@@ -16,28 +16,37 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const updated = await prisma.sMTPConfig.update({
+    // Deactivate all accounts for this user
+    await prisma.systemConfig.updateMany({
+      where: {
+        userId,
+      },
+      data: {
+        isActive: false,
+      },
+    });
+
+    // Activate the selected one
+    const activated = await prisma.systemConfig.update({
       where: {
         id,
       },
       data: {
-        warmup,
+        isActive: true,
       },
     });
 
     return NextResponse.json({
       success: true,
-      message: "SMTP warmup updated",
-      data: updated,
+      message: "Active SMTP account updated",
+      data: activated,
     });
-
   } catch (error) {
     console.error(error);
-
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to update SMTP warmup",
+        message: "Failed to activate SMTP account",
       },
       {
         status: 500,
