@@ -91,7 +91,7 @@ model EmailTemplate {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   subject   String
-  body      LongText
+  body String? @db.LongText
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

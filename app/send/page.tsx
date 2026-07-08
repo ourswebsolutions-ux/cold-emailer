@@ -11,6 +11,15 @@ import { AlertCircle, CheckCircle2, Send, Trash2, Pause, Upload } from "lucide-r
 import dynamic from "next/dynamic"
 import "react-quill-new/dist/quill.snow.css"
 
+// Import Select components
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+
 const ReactQuill = dynamic(() => import("react-quill-new"), {
   ssr: false,
 })
@@ -57,6 +66,12 @@ interface SMTPAccount {
   isActive: boolean
 }
 
+interface EmailTemplate {
+  id: string
+  subject: string
+  body: string
+}
+
 export default function SendPage() {
   const [senderEmail, setSenderEmail] = useState("")
   const [senderName, setSenderName] = useState("")
@@ -83,6 +98,11 @@ export default function SendPage() {
   const [maxDelay, setMaxDelay] = useState("2")
   const [activeSMTP, setActiveSMTP] = useState<SMTPAccount | null>(null)
   const [userId, setUserId] = useState<string>("")
+
+  // Template states
+  const [templates, setTemplates] = useState<EmailTemplate[]>([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
 
   const csvFileInputRef = useRef<HTMLInputElement>(null)
 
@@ -147,6 +167,42 @@ export default function SendPage() {
   useEffect(() => {
     fetchActiveSMTP()
   }, [userId])
+
+  // Fetch templates when userId is available
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      if (!userId) return
+      
+      setLoadingTemplates(true)
+      try {
+        const response = await fetch(`/api/email-templates?userId=${userId}`)
+        if (response.ok) {
+          const data = await response.json()
+          setTemplates(data || [])
+        } else {
+          console.error("Failed to fetch templates")
+          setTemplates([])
+        }
+      } catch (error) {
+        console.error("Error fetching templates:", error)
+        setTemplates([])
+      } finally {
+        setLoadingTemplates(false)
+      }
+    }
+
+    fetchTemplates()
+  }, [userId])
+
+  const handleTemplateSelect = (templateId: string) => {
+    setSelectedTemplateId(templateId)
+    
+    const selectedTemplate = templates.find(t => t.id === templateId)
+    if (selectedTemplate) {
+      setSubject(selectedTemplate.subject)
+      setBody(selectedTemplate.body)
+    }
+  }
 
   const isEmailFor = (str: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)
 
@@ -346,6 +402,7 @@ export default function SendPage() {
     setSingleFile(null)
     setSubject("")
     setBody("")
+    setSelectedTemplateId("")
     clearDraft()
     fileInputsRef.current.forEach((input) => {
       input.value = ""
@@ -370,8 +427,36 @@ export default function SendPage() {
           <div className="lg:col-span-2 space-y-4 sm:space-y-6">
             {/* Email Details */}
             <Card className="animate-slideInLeft">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle className="text-lg sm:text-xl">Email Details</CardTitle>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-blue-500 font-medium ">  Choose Template</label>
+                  <Select 
+                    value={selectedTemplateId} 
+                    onValueChange={handleTemplateSelect}
+                    disabled={loadingTemplates || templates.length === 0}
+                  >
+                    <SelectTrigger className="w-[220px]">
+                      <SelectValue placeholder={
+                        loadingTemplates 
+                          ? "Loading Templates..." 
+                          : templates.length === 0 
+                            ? "No Templates Found" 
+                            : "Select Template"
+                      } />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {templates.map((template) => (
+                        <SelectItem key={template.id} value={template.id}>
+                          {template.subject}
+                        </SelectItem>
+                      ))}
+                      {templates.length === 0 && !loadingTemplates && (
+                        <SelectItem value="none" disabled>No Templates Found</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div>
