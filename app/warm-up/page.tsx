@@ -88,7 +88,7 @@ const EmailWarmupPage: React.FC = () => {
           displayName: config.senderName || config.senderEmail.split('@')[0],
           status: 'active' as const,
           repliesToday: 0,
-          addedDate: formatDate(config.createdAt)
+          addedDate: formatDate(config.updatedAt)
         }));
       
       setAccounts(activeWarmup);
@@ -179,7 +179,7 @@ const EmailWarmupPage: React.FC = () => {
                 <CardDescription className="text-base">
                   Manage your enrolled email accounts ({accounts.length})
 
-                  <span className='block text-red-700'>This Feature is comming soon </span>
+                  {/* <span className='block text-red-700'>This Feature is comming soon </span> */}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -216,12 +216,12 @@ const EmailWarmupPage: React.FC = () => {
 
                         <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mt-8 text-sm">
                           <div>
-                            <p className="text-zinc-500">Replies Today</p>
-                            <p className="text-2xl font-semibold mt-1">{account.repliesToday}</p>
+                            <p className="text-zinc-500">Added</p>
+                            <p className="text-2xl font-semibold mt-1">{account.addedDate}</p>
                           </div>
                           <div>
-                            <p className="text-zinc-500">Added</p>
-                            <p className="text-zinc-700 mt-1">{account.addedDate}</p>
+                            {/* <p className="text-zinc-500">Added</p>
+                            <p className="text-zinc-700 mt-1">{account.addedDate}</p> */}
                           </div>
                           <div className="flex items-end justify-end gap-3 col-span-2 md:col-span-1">
                             <Button 
