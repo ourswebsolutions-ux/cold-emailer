@@ -157,11 +157,9 @@ const EmailWarmupPage: React.FC = () => {
         {/* Header - unchanged */}
         <div className="mb-10 md:mb-12">
           <div className="flex flex-col md:flex-row md:items-center gap-4">
-            <div className="w-12 h-12 rounded-3xl bg-gradient-to-br from-violet-600 to-fuchsia-600 flex items-center justify-center shadow-lg flex-shrink-0">
-              <Mail className="w-7 h-7 text-white" />
-            </div>
+           
             <div>
-              <h1 className="text-3xl md:text-4xl font-bold tracking-tight">Email Warmup</h1>
+              <h2 className="text-3xl md:text-3xl font-bold tracking-tight">Email  <span className='text-blue-600'>WarmUp </span></h2>
               <p className="text-zinc-600 mt-1 text-base md:text-lg">Premium Deliverability Management</p>
             </div>
           </div>
@@ -173,7 +171,7 @@ const EmailWarmupPage: React.FC = () => {
             <Card className="bg-white border border-zinc-100 shadow-xl">
               <CardHeader className="pb-6">
                 <CardTitle className="text-2xl flex items-center gap-3">
-                  <Inbox className="w-6 h-6 text-violet-600" />
+                  <Inbox className="w-6 h-6 text-blue-600" />
                   Active Warmup Accounts
                 </CardTitle>
                 <CardDescription className="text-base">
@@ -201,7 +199,7 @@ const EmailWarmupPage: React.FC = () => {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-4">
                             <div className="w-12 h-12 bg-gradient-to-br from-violet-100 to-fuchsia-100 rounded-2xl flex items-center justify-center flex-shrink-0">
-                              <Mail className="w-6 h-6 text-violet-600" />
+                              <Mail className="w-6 h-6 text-blue-600" />
                             </div>
                             <div className="min-w-0">
                               <div className="font-semibold text-lg truncate">{account.displayName}</div>
@@ -255,7 +253,7 @@ const EmailWarmupPage: React.FC = () => {
             <Card className="bg-white border border-zinc-100 shadow-xl h-full">
               <CardHeader>
                 <CardTitle className="text-2xl flex items-center gap-3">
-                  <Sparkles className="w-6 h-6 text-amber-500" />
+                  <Sparkles className="w-6 h-6 text-blue-500" />
                   Available Emails
                 </CardTitle>
                 <CardDescription>

@@ -235,7 +235,7 @@ export default function EnvPage() {
       <div className="max-w-7xl mx-auto">
         <div className="mb-8 md:mb-12 animate-fadeInUp">
           <h1 className="text-3xl md:text-4xl font-bold text-foreground mb-3">
-            SMTP Configuration
+            SMTP <span className="text-blue-600">Configuration</span>
           </h1>
           <p className="text-muted-foreground max-w-md">
             Manage multiple email sending accounts
