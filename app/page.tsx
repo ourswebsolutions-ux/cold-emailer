@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Mail, Settings, Zap, Building2, Users, Globe, ArrowRight, Shield, Sparkles } from "lucide-react";
+import { Mail, Settings, Zap, Building2, Users, Globe, ArrowRight, Shield, Sparkles, Check,Phone ,MessageCircle} from "lucide-react";
 
 const MS_IN_24_HOURS = 24 * 60 * 60 * 1000;
 const MS_IN_48_HOURS = 48 * 60 * 60 * 1000;
@@ -108,8 +108,8 @@ export default function Home() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mt-10">
             <Link href="/send">
-              <Button size="lg" className="bg-violet-600 hover:bg-violet-700 text-white px-8 text-lg h-14 rounded-2xl group">
-                Start Sending Emails
+              <Button size="lg" className="bg-black hover:bg-blue-700 text-white px-8 text-lg h-14 rounded-2xl group">
+               <span className="bg-gradient-to-r from-blue-600 to-sky-200 bg-clip-text text-transparent">Start Sending Emails</span> 
                 <ArrowRight className="ml-2 group-hover:translate-x-1 transition" />
               </Button>
             </Link>
@@ -183,7 +183,7 @@ export default function Home() {
         </Card>
 
         {/* Statistics */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-20">
           {[
             { label: "Trusted Companies", value: displayCompanies, icon: Building2, color: "blue" },
             { label: "Active Users", value: displayUsers, icon: Users, color: "indigo" },
@@ -210,7 +210,211 @@ export default function Home() {
             </Card>
           ))}
         </div>
+
+        {/* Pricing Section */}
+        <div className="mb-12">
+          <div className="text-center mb-12">
+            <div className="inline-flex items-center gap-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-full px-4 py-1.5 mb-6 text-sm font-medium">
+              <Shield className="w-4 h-4 text-emerald-600" />
+              Flexible Plans
+            </div>
+            <h2 className="text-4xl md:text-5xl font-bold tracking-tighter text-zinc-900 dark:text-white mb-4">
+              Simple,<span className="bg-gradient-to-r from-blue-600 to-sky-200 bg-clip-text text-transparent">Transparent Pricing</span> 
+            </h2>
+            <p className="max-w-md mx-auto text-zinc-600 dark:text-zinc-400">
+              Choose the perfect plan for your cold email needs. Cancel anytime.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
+            {/* Monthly Plan */}
+            <Card className="border border-zinc-200 dark:border-zinc-800 hover:shadow-xl transition-all duration-300">
+              <CardHeader className="text-center pb-8">
+                <CardTitle className="text-2xl">Starter</CardTitle>
+                <div className="mt-4">
+                  <span className="text-5xl font-bold tracking-tighter">2k</span>
+                  <span className="text-zinc-500 dark:text-zinc-400">/mo</span>
+                </div>
+                <CardDescription className="mt-2">Billed monthly</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <ul className="space-y-4 text-sm">
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Unlimited emails/month</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Basic AI personalization</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>1 SMTP account</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Real-time analytics</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Email support</span>
+                  </li>
+                </ul>
+                <Button className="w-full h-12 text-base" variant="outline">
+                  Choose Monthly
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* 6-Month Plan - Most Popular */}
+            <Card className="border-2 border-violet-600 relative">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-xs font-semibold px-4 py-1 rounded-full">
+                MOST POPULAR
+              </div>
+              <CardHeader className="text-center pb-8 pt-10">
+                <CardTitle className="text-2xl">Growth</CardTitle>
+                <div className="mt-4">
+                  <span className="text-5xl font-bold tracking-tighter">8.5k</span>
+                  <span className="text-zinc-500 dark:text-zinc-400">/mo</span>
+                </div>
+                <CardDescription className="mt-2">
+                  Billed as $30.62 every 6 months • <span className="text-emerald-600 font-medium">Save 17%</span>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <ul className="space-y-4 text-sm">
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>UNlimited emails/month</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Advanced AI personalization</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Up to 5 SMTP accounts</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Priority support</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Campaign scheduling</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Deliverability insights</span>
+                  </li>
+                </ul>
+                <Button className="w-full h-12 text-base bg-blue-600 hover:bg-violet-700">
+                  Choose 6 Months
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Yearly Plan */}
+            <Card className="border border-zinc-200 dark:border-zinc-800 hover:shadow-xl transition-all duration-300">
+              <CardHeader className="text-center pb-8">
+                <CardTitle className="text-2xl">Enterprise</CardTitle>
+                <div className="mt-4">
+                  <span className="text-5xl font-bold tracking-tighter">12k</span>
+                  <span className="text-zinc-500 dark:text-zinc-400">/mo</span>
+                </div>
+                <CardDescription className="mt-2">
+                  Billed as $43.24 every year • <span className="text-emerald-600 font-medium">Save 28%</span>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <ul className="space-y-4 text-sm">
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Unlimited emails</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Full AI suite + custom prompts</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Unlimited SMTP accounts</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Team collaboration</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>API access</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <Check className="w-5 h-5 text-emerald-500 mt-0.5 flex-shrink-0" />
+                    <span>Premium support + onboarding</span>
+                  </li>
+                </ul>
+                <Button className="w-full h-12 text-base" variant="outline">
+                  Choose Yearly
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
+          <p className="text-center text-xs text-zinc-500 dark:text-zinc-400 mt-8">
+            All plans include 14-day money-back guarantee. VAT may apply.
+          </p>
+        </div>
+        <div className="bg-blue-400 rounded-3xl p-10 md:p-16 text-center text-white">
+          <div className="max-w-2xl mx-auto">
+            <h2 className="text-4xl md:text-5xl font-bold tracking-tighter mb-6">
+              Ready to Scale Your Outreach?
+            </h2>
+            <p className="text-xl text-violet-100 mb-10">
+              Speak with our team instantly. Get personalized guidance and start sending high-converting cold emails today.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              {/* WhatsApp Button */}
+              <a 
+                href="https://wa.me/923245237429" 
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex"
+              >
+                <Button 
+                  size="lg" 
+                  className="bg-white text-blue-700 bg-green-500 hover:bg-white/90 text-lg h-16 px-10 rounded-2xl flex items-center gap-3 w-full sm:w-auto"
+                >
+                  <MessageCircle className="w-6 h-6" />
+                  Chat on WhatsApp
+                </Button>
+              </a>
+
+              {/* Call Button */}
+              <a 
+                href="tel:+1234567890" 
+                className="inline-flex"
+              >
+                <Button 
+                  size="lg" 
+                  variant="outline" 
+                  className="border-white text-black  hover:bg-white/10 text-lg h-16 px-10 rounded-2xl flex items-center gap-3 w-full sm:w-auto"
+                >
+                  <Phone className="w-6 h-6" />
+                  Call Us Now
+                </Button>
+              </a>
+            </div>
+
+            <p className="text-sm text-violet-200 mt-8">
+              Available 24/7 Hours 
+            </p>
+          </div>
+        </div>
       </div>
+      
     </main>
   );
 }
+
+
