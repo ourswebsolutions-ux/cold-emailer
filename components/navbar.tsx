@@ -137,8 +137,11 @@ export default function Navbar() {
               <Link href="/send" className="text-sm lg:text-base font-medium text-foreground hover:text-primary transition-colors duration-200 py-2">
                 Sender
               </Link>
-              <Link href="/warmup" className="text-sm lg:text-base font-medium text-foreground hover:text-primary transition-colors duration-200 py-2">
-                Warmup
+              <Link href="/warm-up" className="text-sm lg:text-base font-medium text-foreground hover:text-primary transition-colors duration-200 py-2">
+                WarmUp
+              </Link>
+               <Link href="/email-templetes" className="text-sm lg:text-base font-medium text-foreground hover:text-primary transition-colors duration-200 py-2">
+                Email Templetes
               </Link>
             </div>
 
