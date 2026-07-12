@@ -85,7 +85,9 @@ export default function SendPage() {
   const [isSending, setIsSending] = useState(false)
   const [statuses, setStatuses] = useState<EmailStatus[]>([])
   const [autoDelay, setAutoDelay] = useState(false)
+  const [shuffle, setShuffle] = useState(false)
 
+  console.log(shuffle,"helooooooooooooooo")
   // CSV Preview States
   const [showCsvPreview, setShowCsvPreview] = useState(false)
   const [csvPreviewData, setCsvPreviewData] = useState<Recipient[]>([])
@@ -172,7 +174,7 @@ export default function SendPage() {
   useEffect(() => {
     const fetchTemplates = async () => {
       if (!userId) return
-      
+
       setLoadingTemplates(true)
       try {
         const response = await fetch(`/api/email-templates?userId=${userId}`)
@@ -196,7 +198,7 @@ export default function SendPage() {
 
   const handleTemplateSelect = (templateId: string) => {
     setSelectedTemplateId(templateId)
-    
+
     const selectedTemplate = templates.find(t => t.id === templateId)
     if (selectedTemplate) {
       setSubject(selectedTemplate.subject)
@@ -215,8 +217,8 @@ export default function SendPage() {
       const columns = line.split(',').map(col => col.trim().replace(/^"|"$/g, ''))
       if (columns.length === 0) continue
 
-      if (columns[0].toLowerCase() === "name" && 
-          (columns[1]?.toLowerCase() === "email" || columns[1]?.toLowerCase() === "e-mail")) {
+      if (columns[0].toLowerCase() === "name" &&
+        (columns[1]?.toLowerCase() === "email" || columns[1]?.toLowerCase() === "e-mail")) {
         continue
       }
 
@@ -328,6 +330,8 @@ export default function SendPage() {
       formData.append("autoDelay", autoDelay.toString())
       formData.append("minDelay", minDelay)
       formData.append("maxDelay", maxDelay)
+      formData.append("shuffle", shuffle)
+
       formData.append("recipients", JSON.stringify(recipients))
 
       if (attachmentMode === "single" && singleFile) {
@@ -431,17 +435,17 @@ export default function SendPage() {
                 <CardTitle className="text-lg sm:text-xl">Email Details</CardTitle>
                 <div className="flex items-center gap-2">
                   <label className="text-sm text-blue-500 font-medium ">  Choose Template</label>
-                  <Select 
-                    value={selectedTemplateId} 
+                  <Select
+                    value={selectedTemplateId}
                     onValueChange={handleTemplateSelect}
                     disabled={loadingTemplates || templates.length === 0}
                   >
                     <SelectTrigger className="w-[220px]">
                       <SelectValue placeholder={
-                        loadingTemplates 
-                          ? "Loading Templates..." 
-                          : templates.length === 0 
-                            ? "No Templates Found" 
+                        loadingTemplates
+                          ? "Loading Templates..."
+                          : templates.length === 0
+                            ? "No Templates Found"
                             : "Select Template"
                       } />
                     </SelectTrigger>
@@ -456,6 +460,17 @@ export default function SendPage() {
                       )}
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm text-blue-500 font-medium">Shuffle Sender</label>
+                  <Switch
+                    checked={shuffle}
+                    onChange={setShuffle}
+                    onColor="#2563eb"
+                    offColor="#9ca3af"
+                    height={22}
+                    width={46}
+                  />
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
