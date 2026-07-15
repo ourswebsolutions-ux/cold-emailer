@@ -132,6 +132,16 @@ async function validateRecipient(email: string): Promise<ValidationResult> {
   return res;
 }
 
+  const GREETINGS = [
+  "Hi",
+  "Hello",
+  "Hey"
+];
+
+function randomGreeting() {
+  return GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -196,6 +206,8 @@ export async function POST(request: NextRequest) {
     const jobId = randomBytes(16).toString("hex");
     const job: SendJob = { id: jobId, status: "running", updates: [], subscribers: new Set() };
     jobs.set(jobId, job);
+
+  
 
     processSendJob(jobId, { subject, body, delay, autoDelay, minDelay, maxDelay, recipients, formData, smtpAccounts })
       .catch((error) => {
@@ -267,7 +279,9 @@ async function processSendJob(
     broadcastUpdate(job, { type: "progress", index: i, email, status: "sending" });
 
     try {
-      const personalizedBody = body.replace(/\{\{name\}\}/g, recipient.name || email.split("@")[0]);
+      const personalizedBody = body
+  .replace(/\{\{greeting\}\}/g, randomGreeting())
+  .replace(/\{\{name\}\}/g, recipient.name || email.split("@")[0]);
 
       const mailOptions: nodemailer.SendMailOptions = {
         from: senderName ? `${senderName} <${senderEmail}>` : senderEmail,
