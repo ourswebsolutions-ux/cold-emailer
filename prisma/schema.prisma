@@ -53,12 +53,11 @@ model SystemConfig {
   senderName  String?
   isActive    Boolean  @default(false)
   createdAt   DateTime @default(now())
-  p   DateTime @updatedAt
+  updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, senderEmail])
 }
-
 
 model WarmupEmail {
   id String @id @default(cuid())
