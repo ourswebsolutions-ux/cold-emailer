@@ -3,7 +3,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { LogIn, LogOut, Phone, Lock, Shield, Zap, X } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { LogIn, LogOut, Phone, Lock, Shield, Zap, X, Mail, FileText, ChevronDown } from "lucide-react";
 
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -15,6 +16,11 @@ export default function Navbar() {
   const [error, setError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [userPhone, setUserPhone] = useState("");
+  const [mobileEmailOpen, setMobileEmailOpen] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+  const pathname = usePathname();
+  const isEmailActive = pathname === "/emails" || pathname === "/email-templetes";
 
   // Validate session on mount
   useEffect(() => {
@@ -41,6 +47,18 @@ export default function Navbar() {
     };
 
     validateSession();
+  }, []);
+
+  // ESC key support
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsDropdownOpen(false);
+        setMobileEmailOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
   }, []);
 
   async function handleAuth() {
@@ -121,7 +139,7 @@ export default function Navbar() {
     <>
       {/* Main Navbar */}
       <nav className="sticky top-0 z-50 bg-white/95 dark:bg-slate-950/95 backdrop-blur-md border-b border-blue-100 dark:border-blue-900/30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 ">
           <div className="flex items-center justify-between h-16 sm:h-20">
             <Link
               href="/"
@@ -140,9 +158,58 @@ export default function Navbar() {
               <Link href="/warm-up" className="text-sm lg:text-base font-medium text-foreground hover:text-primary transition-colors duration-200 py-2">
                 WarmUp
               </Link>
-               <Link href="/email-templetes" className="text-sm lg:text-base font-medium text-foreground hover:text-primary transition-colors duration-200 py-2">
-                Email Templetes
-              </Link>
+
+              {/* Premium Email Dropdown */}
+              <div className="relative">
+                <div
+                  className={`flex items-center gap-1 text-sm lg:text-base font-medium py-2 cursor-pointer transition-colors duration-200 ${isEmailActive ? "text-primary" : "text-foreground hover:text-primary"}`}
+                  onMouseEnter={() => setIsDropdownOpen(true)}
+                  onMouseLeave={() => setIsDropdownOpen(false)}
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                >
+                  Email
+                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isDropdownOpen ? "rotate-180" : ""}`} />
+                </div>
+
+                {/* Dropdown Menu */}
+                <div
+                  className={`absolute left-1/2 -translate-x-1/2 top-full z-50 pt-3 transition-all duration-200 origin-top ${
+                    isDropdownOpen ? "opacity-100 scale-100 visible" : "opacity-0 scale-95 invisible pointer-events-none"
+                  }`}
+                  onMouseEnter={() => setIsDropdownOpen(true)}
+                  onMouseLeave={() => setIsDropdownOpen(false)}
+                >
+                  <div className="bg-white dark:bg-slate-950 rounded-2xl shadow-xl border border-gray-100 dark:border-slate-800 w-[340px] py-2 overflow-hidden">
+                    <Link
+                      href="/emails"
+                      onClick={() => setIsDropdownOpen(false)}
+                      className={`group/item flex items-start gap-4 px-4 py-3 mx-1.5 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-800 transition-all ${pathname === "/emails" ? "bg-blue-50 dark:bg-blue-950/50" : ""}`}
+                    >
+                      <div className="mt-0.5 text-blue-600 flex-shrink-0">
+                        <Mail className="w-5 h-5 transition-transform group-hover/item:scale-110 duration-200" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-foreground">Emails</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">Manage contacts and email lists</div>
+                      </div>
+                    </Link>
+
+                    <Link
+                      href="/email-templetes"
+                      onClick={() => setIsDropdownOpen(false)}
+                      className={`group/item flex items-start gap-4 px-4 py-3 mx-1.5 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-800 transition-all ${pathname === "/email-templetes" ? "bg-blue-50 dark:bg-blue-950/50" : ""}`}
+                    >
+                      <div className="mt-0.5 text-blue-600 flex-shrink-0">
+                        <FileText className="w-5 h-5 transition-transform group-hover/item:scale-110 duration-200" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-foreground">Email Templates</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">Create and manage email templates</div>
+                      </div>
+                    </Link>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="hidden sm:flex items-center gap-4">
@@ -192,7 +259,44 @@ export default function Navbar() {
               <Link href="/send" onClick={() => setIsOpen(false)} className="block px-4 py-3 rounded-xl text-foreground hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors">
                 Sender
               </Link>
-              
+
+              {/* Mobile Email Collapsible */}
+              <div>
+                <button
+                  onClick={() => setMobileEmailOpen(!mobileEmailOpen)}
+                  className="flex w-full items-center justify-between px-4 py-3 rounded-xl text-foreground hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                >
+                  <span>Email</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${mobileEmailOpen ? "rotate-180" : ""}`} />
+                </button>
+                {mobileEmailOpen && (
+                  <div className="pl-8 mt-1 space-y-1">
+                    <Link
+                      href="/emails"
+                      onClick={() => {
+                        setIsOpen(false);
+                        setMobileEmailOpen(false);
+                      }}
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl text-foreground hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                    >
+                      <Mail className="w-4 h-4" />
+                      Emails
+                    </Link>
+                    <Link
+                      href="/email-templetes"
+                      onClick={() => {
+                        setIsOpen(false);
+                        setMobileEmailOpen(false);
+                      }}
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl text-foreground hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                    >
+                      <FileText className="w-4 h-4" />
+                      Email Templates
+                    </Link>
+                  </div>
+                )}
+              </div>
+
               {loggedIn ? (
                 <>
                   <div className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 border-t border-gray-100 dark:border-gray-800 mt-2">
