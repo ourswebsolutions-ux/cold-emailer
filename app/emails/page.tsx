@@ -51,19 +51,23 @@ export default function ContactManager() {
   }, []);
 
   const fetchContacts = async () => {
-    if (!listId) return;
+    if (!userId) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/email?userId=${userId}`);
+      const res = await fetch(`/api/email?userId=${userId}&listId=${listId}`);
       const json = await res.json();
       const data = json.data || [];
       setContacts([...data]);
       setOriginalContacts([...data]);
-    } catch (e) {}
+    } catch (e) {
+      console.error("Fetch error:", e);
+    }
     setLoading(false);
   };
 
-  useEffect(() => { fetchContacts(); }, [userId]);
+  useEffect(() => { 
+    fetchContacts(); 
+  }, [userId, listId]);
 
   const filteredContacts = useMemo(() => {
     return contacts.filter(c =>
@@ -110,27 +114,124 @@ export default function ContactManager() {
     showToast(`Selected first ${toSelect.length} rows`);
   };
 
-  const saveAll = async () => {
-    const valid = contacts.filter(c => c.name?.trim() && c.email?.trim() && c.category?.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email));
-    const newRows = valid.filter(c => c.id.startsWith('temp-')).map(c => { const p = {...c}; delete p.id; return p; });
-    const updatedRows = valid.filter(c => !c.id.startsWith('temp-')).filter(c => {
-      const orig = originalContacts.find(o => o.id === c.id);
-      return orig && JSON.stringify(c) !== JSON.stringify(orig);
+const saveAll = async () => {
+  console.clear();
+  console.log("========== SAVE ALL ==========");
+
+  console.log("Total Contacts:", contacts);
+  console.log("Original Contacts:", originalContacts);
+
+const valid = contacts.filter(c =>
+  c.name?.trim() &&
+  c.email?.trim() &&
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)
+);
+
+  console.log("Valid Contacts:", valid);
+  console.log("Valid Count:", valid.length);
+
+  const newRows = valid
+    .filter(c => c.id.startsWith("temp-"))
+    .map(c => {
+      const p = { ...c };
+      delete p.id;
+      return p;
     });
 
-    if (newRows.length) {
-      await fetch('/api/email', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ userId, listId, contacts: newRows }) });
-    }
-    if (updatedRows.length) {
-      await fetch('/api/email', { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ contacts: updatedRows }) });
-    }
-    await fetchContacts();
-    showToast('Contacts saved');
-  };
+  console.log("New Rows:", newRows);
+  console.log("New Rows Count:", newRows.length);
 
+  const updatedRows = valid
+    .filter(c => !c.id.startsWith("temp-"))
+    .filter(c => {
+      const orig = originalContacts.find(o => o.id === c.id);
+
+      if (!orig) {
+        console.log("Original not found:", c.id);
+        return false;
+      }
+
+      const changed =
+        orig.name !== c.name ||
+        orig.email !== c.email ||
+        orig.phone !== c.phone ||
+        orig.website !== c.website ||
+        orig.category !== c.category;
+
+      if (changed) {
+        console.log("Changed:", c.id, {
+          before: orig,
+          after: c,
+        });
+      }
+
+      return changed;
+    });
+
+  console.log("Updated Rows:", updatedRows);
+  console.log("Updated Rows Count:", updatedRows.length);
+
+  try {
+    if (newRows.length > 0) {
+      console.log("Calling POST API...");
+
+      const res = await fetch("/api/email", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId,
+          listId,
+          contacts: newRows,
+        }),
+      });
+
+      console.log("POST Status:", res.status);
+      console.log("POST Response:", await res.text());
+    } else {
+      console.log("POST skipped");
+    }
+
+    if (updatedRows.length > 0) {
+      console.log("Calling PUT API...");
+
+      const res = await fetch("/api/email", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId,
+          listId,
+          contacts: updatedRows,
+        }),
+      });
+
+      console.log("PUT Status:", res.status);
+      console.log("PUT Response:", await res.text());
+    } else {
+      console.log("PUT skipped");
+    }
+
+    console.log("Refreshing contacts...");
+    await fetchContacts();
+
+    console.log("Done");
+    showToast("Contacts saved");
+  } catch (err) {
+    console.error("SAVE ERROR:", err);
+  }
+};
   const deleteContact = async (id: string) => {
     if (!id.startsWith('temp-')) {
-      await fetch('/api/email', { method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ ids: [id], listId }) });
+      try {
+        await fetch('/api/email', { 
+          method: 'DELETE', 
+          headers: {'Content-Type': 'application/json'}, 
+          body: JSON.stringify({ ids: [id], listId }) 
+        });
+      } catch (e) {}
     }
     setContacts(p => p.filter(c => c.id !== id));
     setOriginalContacts(p => p.filter(c => c.id !== id));
@@ -141,7 +242,13 @@ export default function ContactManager() {
     if (!selected.size) return;
     const realIds = Array.from(selected).filter(id => !id.startsWith('temp-'));
     if (realIds.length) {
-      await fetch('/api/email', { method: 'DELETE', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ ids: realIds, listId }) });
+      try {
+        await fetch('/api/email', { 
+          method: 'DELETE', 
+          headers: {'Content-Type': 'application/json'}, 
+          body: JSON.stringify({ ids: realIds, listId }) 
+        });
+      } catch (e) {}
     }
     setContacts(p => p.filter(c => !selected.has(c.id)));
     setOriginalContacts(p => p.filter(c => !selected.has(c.id)));
@@ -165,7 +272,11 @@ export default function ContactManager() {
         }
       });
       if (newContacts.length) {
-        await fetch('/api/email', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ userId, listId, contacts: newContacts }) });
+        await fetch('/api/email', { 
+          method: 'POST', 
+          headers: {'Content-Type': 'application/json'}, 
+          body: JSON.stringify({ userId, listId, contacts: newContacts }) 
+        });
         fetchContacts();
         showToast('Import successful');
       }
