@@ -20,6 +20,8 @@ model User {
   updatedAt         DateTime       @updatedAt
   smtpConfigs       SMTPConfig[]
   systemConfig      SystemConfig[]
+   emailLists        EmailList[]
+  emails            Email[]
   emailTemplates EmailTemplate[]
 }
 
@@ -97,4 +99,72 @@ model EmailTemplate {
   updatedAt DateTime @updatedAt
 
   @@index([userId])
+}
+
+model EmailList {
+  id          String   @id @default(cuid())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?  @db.Text
+
+  totalEmails Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  
+
+  @@index([userId])
+}
+
+
+model Email {
+  id          String   @id @default(cuid())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  
+  name        String?
+
+  email       String
+
+  company     String?
+  website     String?
+  phone       String?
+
+  category    String?
+
+  status      EmailStatus @default(PENDING)
+
+  isVerified  Boolean @default(false)
+  isValid     Boolean?
+
+  notes       String? @db.Text
+
+  customFields Json?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  
+  @@index([userId])
+  
+  @@index([email])
+  @@index([category])
+}
+
+
+enum EmailStatus {
+  PENDING
+  VALID
+  INVALID
+  SENT
+  FAILED
+  BOUNCED
+  REPLIED
+  UNSUBSCRIBED
 }
