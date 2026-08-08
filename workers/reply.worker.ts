@@ -33,8 +33,8 @@ Best regards
 // ============================================================
 
 function getRandomReplyDelay() {
-  const min = 1;
-  const max = 1;
+  const min = 10;
+  const max = 70;
 
   const minutes =
     Math.floor(Math.random() * (max - min + 1)) + min;
