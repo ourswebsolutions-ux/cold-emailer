@@ -26,6 +26,17 @@ interface SMTPConfig {
   updatedAt: string;
 }
 
+interface EmailHealth {
+  id: string;
+  senderEmail: string;
+  senderName?: string;
+  warmup: boolean;
+  warmupDay: number;
+  dailyLimit: number;
+  totalSent: number;
+  totalReplies: number;
+  health: number;
+}
 interface WarmupAccount {
   id: string;
   email: string;
@@ -41,7 +52,7 @@ const EmailWarmupPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-
+const [healthData, setHealthData] = useState<EmailHealth[]>([]);
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return new Intl.DateTimeFormat('en-US', { 
@@ -100,6 +111,27 @@ const EmailWarmupPage: React.FC = () => {
     }
   };
 
+
+  const fetchHealth = async () => {
+  if (!userId) return;
+
+  try {
+    const res = await fetch(
+      `/api/warmup?userId=${encodeURIComponent(userId)}`
+    );
+
+    if (!res.ok) {
+      throw new Error("Failed to load health");
+    }
+
+    const result = await res.json();
+
+    setHealthData(result.data || []);
+  } catch (err) {
+    console.error(err);
+  }
+};
+
   const toggleWarmup = async (id: string, newWarmupState: boolean) => {
     if (!userId) return;
 
@@ -146,9 +178,14 @@ const EmailWarmupPage: React.FC = () => {
   useEffect(() => {
     if (userId) {
       fetchSmtpConfigs();
+          fetchHealth()
     }
   }, [userId]);
 
+
+  const getHealth = (smtpId: string) => {
+  return healthData.find((item) => item.id === smtpId);
+};
   const hasNoConfigs = smtpConfigs.length === 0 && !isLoading;
 
   return (
@@ -181,70 +218,116 @@ const EmailWarmupPage: React.FC = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className={`space-y-4 pr-2 max-h-[520px] overflow-y-auto custom-scroll ${accounts.length > 3 ? 'pb-4' : ''}`}>
-                  {isLoading ? (
-                    <div className="text-center py-20 text-zinc-400">Loading accounts...</div>
-                  ) : error ? (
-                    <div className="text-center py-20 text-red-500">{error}</div>
-                  ) : accounts.length === 0 ? (
-                    <div className="text-center py-20 text-zinc-400">
-                      No active warmup accounts yet. Enable from the right panel.
-                    </div>
-                  ) : (
-                    accounts.map((account) => (
-                      <div 
-                        key={account.id} 
-                        className="group bg-white border border-zinc-100 hover:border-violet-200 rounded-3xl p-6 transition-all duration-300 hover:shadow-md"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 bg-gradient-to-br from-violet-100 to-fuchsia-100 rounded-2xl flex items-center justify-center flex-shrink-0">
-                              <Mail className="w-6 h-6 text-blue-600" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="font-semibold text-lg truncate">{account.displayName}</div>
-                              <div className="text-zinc-600 font-mono text-sm truncate">{account.email}</div>
-                            </div>
-                          </div>
+  <div
+    className={`space-y-4 pr-2 max-h-[520px] overflow-y-auto custom-scroll ${
+      accounts.length > 3 ? "pb-4" : ""
+    }`}
+  >
+    {isLoading ? (
+      <div className="text-center py-20 text-zinc-400">
+        Loading accounts...
+      </div>
+    ) : error ? (
+      <div className="text-center py-20 text-red-500">{error}</div>
+    ) : accounts.length === 0 ? (
+      <div className="text-center py-20 text-zinc-400">
+        No active warmup accounts yet. Enable from the right panel.
+      </div>
+    ) : (
+      accounts.map((account) => {
+        const stats = healthData.find(
+          (item) => item.id === account.id
+        );
 
-                          <Badge className="px-4 py-1.5 text-sm font-medium whitespace-nowrap bg-emerald-100 text-emerald-700">
-                            ● Active
-                          </Badge>
-                        </div>
-
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mt-8 text-sm">
-                          <div>
-                            <p className="text-zinc-500">Added</p>
-                            <p className="text-2xl font-semibold mt-1">{account.addedDate}</p>
-                          </div>
-                          <div>
-                            {/* <p className="text-zinc-500">Added</p>
-                            <p className="text-zinc-700 mt-1">{account.addedDate}</p> */}
-                          </div>
-                          <div className="flex items-end justify-end gap-3 col-span-2 md:col-span-1">
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => toggleAccountStatus(account.id)}
-                              className="border-zinc-300 text-xs md:text-sm"
-                            >
-                              <Pause className="w-4 h-4 mr-1"/> Pause
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => deleteAccount(account.id)}
-                              className="text-red-600 hover:bg-red-50 border-red-200"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
+        return (
+          <div
+            key={account.id}
+            className="group bg-white border border-zinc-100 hover:border-violet-200 rounded-3xl p-6 transition-all duration-300 hover:shadow-md"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-violet-100 to-fuchsia-100 rounded-2xl flex items-center justify-center">
+                  <Mail className="w-6 h-6 text-blue-600" />
                 </div>
-              </CardContent>
+
+                <div>
+                  <div className="font-semibold text-lg">
+                    {account.displayName}
+                  </div>
+
+                  <div className="text-zinc-600 text-sm">
+                    {account.email}
+                  </div>
+                </div>
+              </div>
+
+              <Badge className="bg-emerald-100 text-emerald-700">
+                ● Active
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-6">
+              <div>
+                <p className="text-xs text-zinc-500">Health</p>
+                <p className="text-xl font-bold text-green-600">
+                  {stats?.health ?? 100}%
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs text-zinc-500">Sent</p>
+                <p className="text-xl font-bold">
+                  {stats?.totalSent ?? 0}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs text-zinc-500">Replies</p>
+                <p className="text-xl font-bold">
+                  {stats?.totalReplies ?? 0}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs text-zinc-500">Warmup</p>
+                <p className="text-xl font-bold">
+                  Day {stats?.warmupDay ?? 1}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs text-zinc-500">Added</p>
+                <p className="font-semibold">
+                  {account.addedDate}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => toggleAccountStatus(account.id)}
+              >
+                <Pause className="w-4 h-4 mr-1" />
+                Pause
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => deleteAccount(account.id)}
+                className="text-red-600 border-red-200 hover:bg-red-50"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        );
+      })
+    )}
+  </div>
+</CardContent>
             </Card>
           </div>
 

@@ -38,6 +38,7 @@ model SMTPConfig {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emailHealth EmailHealth?
 
   @@unique([userId, senderEmail])
 }
@@ -56,22 +57,10 @@ model SystemConfig {
   updatedAt   DateTime @updatedAt
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+
   @@unique([userId, senderEmail])
 }
 
-model WarmupEmail {
-  id String @id @default(cuid())
-
-  senderId String
-  receiverEmail String
-
-  subject String
-  status String
-
-  sentAt DateTime @default(now())
-
-  createdAt DateTime @default(now())
-}
 
 enum UserRole {
   ADMIN
@@ -136,6 +125,32 @@ model Email {
   @@index([category])
 }
 
+
+
+model EmailHealth {
+  id               String   @id @default(cuid())
+
+  smtpConfigId     String   @unique
+  smtpConfig       SMTPConfig @relation(fields: [smtpConfigId], references: [id], onDelete: Cascade)
+
+  warmupDay        Int      @default(1)
+  dailyLimit       Int      @default(3)
+
+  totalSent        Int      @default(0)
+  totalReplies     Int      @default(0)
+
+  todaySent        Int      @default(0)
+  todayReplies     Int      @default(0)
+
+  health           Int      @default(0)
+
+  startedAt        DateTime @default(now())
+  lastWarmupDate   DateTime?
+  completed        Boolean  @default(false)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
 
 enum EmailStatus {
   PENDING
