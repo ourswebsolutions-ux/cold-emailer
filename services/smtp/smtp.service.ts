@@ -38,7 +38,7 @@ export async function sendSMTPEmail(
   await transporter.sendMail({
 
     from: {
-      name: data.fromName || "Warmup",
+      name: data.fromName || "Axoraweb Solutions",
       address: data.from
     },
 
