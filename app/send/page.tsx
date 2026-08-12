@@ -1,5 +1,4 @@
 "use client"
-
 import type React from "react"
 import Switch from "react-switch"
 import { useState, useEffect, useRef } from "react"
@@ -7,10 +6,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
-import { AlertCircle, CheckCircle2, Send, Trash2, Pause, Upload } from "lucide-react"
+import { AlertCircle, CheckCircle2, Send, Trash2, Pause, Upload,X } from "lucide-react"
 import dynamic from "next/dynamic"
 import "react-quill-new/dist/quill.snow.css"
-
 // Import Select components
 import {
   Select,
@@ -19,11 +17,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-
 const ReactQuill = dynamic(() => import("react-quill-new"), {
   ssr: false,
 })
-
 const quillModules = {
   toolbar: [
     [{ font: [] }],
@@ -36,25 +32,21 @@ const quillModules = {
     ["clean"],
   ],
 }
-
 const quillFormats = [
   "font", "size", "bold", "italic", "underline", "strike",
   "color", "background", "align", "list", "blockquote", "link",
 ]
-
 interface EmailStatus {
   index: number
   email: string
   status: "pending" | "sending" | "sent" | "error"
   message?: string
 }
-
 interface Recipient {
   name: string
   email: string
   file?: File
 }
-
 interface SMTPAccount {
   id: string
   senderEmail: string
@@ -65,13 +57,11 @@ interface SMTPAccount {
   password: string
   isActive: boolean
 }
-
 interface EmailTemplate {
   id: string
   subject: string
   body: string
 }
-
 export default function SendPage() {
   const [senderEmail, setSenderEmail] = useState("")
   const [senderName, setSenderName] = useState("")
@@ -86,13 +76,19 @@ export default function SendPage() {
   const [statuses, setStatuses] = useState<EmailStatus[]>([])
   const [autoDelay, setAutoDelay] = useState(false)
   const [shuffle, setShuffle] = useState(false)
+  console.log(shuffle, "helooooooooooooooo")
 
-  console.log(shuffle,"helooooooooooooooo")
+const [loadingSpinGreeting, setLoadingSpinGreeting] = useState(false)
+  // ===== Spin Text =====
+  const [spinGreeting, setSpinGreeting] = useState(false)
+  const [greetings, setGreetings] = useState<string[]>([])
+  const [newGreeting, setNewGreeting] = useState("")
+  const [loadingGreetings, setLoadingGreetings] = useState(false)
+
   // CSV Preview States
   const [showCsvPreview, setShowCsvPreview] = useState(false)
   const [csvPreviewData, setCsvPreviewData] = useState<Recipient[]>([])
   const [tempCsvText, setTempCsvText] = useState("")
-
   const [jobId, setJobId] = useState<string | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
   const fileInputsRef = useRef<Map<number, HTMLInputElement>>(new Map())
@@ -100,18 +96,77 @@ export default function SendPage() {
   const [maxDelay, setMaxDelay] = useState("2")
   const [activeSMTP, setActiveSMTP] = useState<SMTPAccount | null>(null)
   const [userId, setUserId] = useState<string>("")
-
   // Template states
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
   const [loadingTemplates, setLoadingTemplates] = useState(false)
-
   const csvFileInputRef = useRef<HTMLInputElement>(null)
-
   // ==================== DRAFT PERSISTENCE ====================
   const DRAFT_KEY = "coldEmailDraft_v1"
-
   // Load draft on mount
+
+
+
+  const fetchGreetingStatus = async () => {
+  if (!userId) return
+
+  try {
+    const res = await fetch(`/api/email/greeting?userId=${userId}`)
+
+    const result = await res.json()
+
+    if (result.success) {
+      setSpinGreeting(result.enabled)
+    }
+  } catch (error) {
+    console.error("Failed to fetch greeting status:", error)
+  }
+}
+useEffect(() => {
+  if (!userId) return
+
+  fetchGreetings()
+  fetchGreetingStatus()
+}, [userId])
+
+
+
+const handleSpinGreetingToggle = async (enabled: boolean) => {
+  if (!userId) return
+
+  const previousValue = spinGreeting
+
+  // UI immediately update
+  setSpinGreeting(enabled)
+  setLoadingSpinGreeting(true)
+
+  try {
+    const res = await fetch("/api/email/greeting", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        userId,
+        enabled,
+      }),
+    })
+
+    const result = await res.json()
+
+    if (!result.success) {
+      // rollback
+      setSpinGreeting(previousValue)
+      console.error(result.error || "Failed to update Spin Text")
+    }
+  } catch (error) {
+    // rollback
+    setSpinGreeting(previousValue)
+    console.error("Failed to update Spin Text:", error)
+  } finally {
+    setLoadingSpinGreeting(false)
+  }
+}
   useEffect(() => {
     try {
       const saved = localStorage.getItem(DRAFT_KEY)
@@ -124,7 +179,6 @@ export default function SendPage() {
       console.error("Failed to load draft", e)
     }
   }, [])
-
   // Auto save draft
   useEffect(() => {
     try {
@@ -134,11 +188,9 @@ export default function SendPage() {
       console.error("Failed to save draft", e)
     }
   }, [subject, body])
-
   const clearDraft = () => {
     localStorage.removeItem(DRAFT_KEY)
   }
-
   // ==================== USER & SMTP ====================
   useEffect(() => {
     const user = localStorage.getItem("user")
@@ -149,7 +201,6 @@ export default function SendPage() {
       } catch (e) { }
     }
   }, [])
-
   const fetchActiveSMTP = async () => {
     if (!userId) return
     try {
@@ -165,16 +216,13 @@ export default function SendPage() {
       console.error("Failed to fetch active SMTP:", error)
     }
   }
-
   useEffect(() => {
     fetchActiveSMTP()
   }, [userId])
-
   // Fetch templates when userId is available
   useEffect(() => {
     const fetchTemplates = async () => {
       if (!userId) return
-
       setLoadingTemplates(true)
       try {
         const response = await fetch(`/api/email-templates?userId=${userId}`)
@@ -192,13 +240,35 @@ export default function SendPage() {
         setLoadingTemplates(false)
       }
     }
-
     fetchTemplates()
+  }, [userId])
+
+  // ===== Spin Text: load saved greetings =====
+  const fetchGreetings = async () => {
+    if (!userId) return
+    setLoadingGreetings(true)
+    try {
+      const res = await fetch(`/api/email/spin-text?userId=${userId}`)
+      const result = await res.json()
+      if (result.success && Array.isArray(result.data)) {
+        setGreetings(result.data.filter((g: unknown): g is string => typeof g === "string"))
+      } else {
+        setGreetings([])
+      }
+    } catch (err) {
+      console.error("Failed to fetch greetings:", err)
+      setGreetings([])
+    } finally {
+      setLoadingGreetings(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchGreetings()
   }, [userId])
 
   const handleTemplateSelect = (templateId: string) => {
     setSelectedTemplateId(templateId)
-
     const selectedTemplate = templates.find(t => t.id === templateId)
     if (selectedTemplate) {
       setSubject(selectedTemplate.subject)
@@ -206,56 +276,92 @@ export default function SendPage() {
     }
   }
 
-  const isEmailFor = (str: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)
+  // ===== Spin Text handlers =====
+  const handleAddGreeting = async (e?: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e && e.key !== "Enter") return
+    const value = newGreeting.trim()
+    if (!value || !userId) return
+    if (greetings.includes(value)) {
+      setNewGreeting("")
+      return
+    }
 
+    try {
+      const res = await fetch("/api/email/spin-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, value }),
+      })
+      const result = await res.json()
+      if (result.success) {
+        setGreetings((prev) => [...prev, value])
+        setNewGreeting("")
+      } else {
+        console.error(result.error || "Failed to add greeting")
+      }
+    } catch (err) {
+      console.error("Error adding greeting:", err)
+    }
+  }
+
+  const handleDeleteGreeting = async (value: string) => {
+    if (!userId) return
+    try {
+      const res = await fetch("/api/email/spin-text", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, value }),
+      })
+      const result = await res.json()
+      if (result.success) {
+        setGreetings((prev) => prev.filter((g) => g !== value))
+      } else {
+        console.error(result.error || "Failed to delete greeting")
+      }
+    } catch (err) {
+      console.error("Error deleting greeting:", err)
+    }
+  }
+
+  const isEmailFor = (str: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)
   // ==================== CSV HANDLING ====================
   const parseCsvToRecipients = (csvText: string): Recipient[] => {
     const lines = csvText.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
     const result: Recipient[] = []
-
     for (const line of lines) {
       const columns = line.split(',').map(col => col.trim().replace(/^"|"$/g, ''))
       if (columns.length === 0) continue
-
       if (columns[0].toLowerCase() === "name" &&
         (columns[1]?.toLowerCase() === "email" || columns[1]?.toLowerCase() === "e-mail")) {
         continue
       }
-
       let name = columns[0] || ""
       let email = columns.length > 1 ? columns[1] : columns[0]
-
       if (!isEmailFor(email) && isEmailFor(name)) {
         [name, email] = [email, name]
       }
-
       if (isEmailFor(email)) {
         result.push({ name: name || email.split("@")[0], email: email.trim() })
       }
     }
     return result
   }
-
   const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-
     if (!file.name.toLowerCase().endsWith(".csv")) {
       alert("Please select a valid CSV file.")
       return
     }
-
     const reader = new FileReader()
     reader.onload = (event) => {
       const csvText = event.target?.result as string
       if (!csvText) return
-
       const parsed = parseCsvToRecipients(csvText)
       if (parsed.length === 0) {
         alert("No valid recipients found in the CSV file.")
         return
       }
-
       setCsvPreviewData(parsed)
       setTempCsvText(parsed.map(r => `${r.name},${r.email}`).join("\n"))
       setShowCsvPreview(true)
@@ -263,12 +369,10 @@ export default function SendPage() {
     reader.readAsText(file)
     e.target.value = ""
   }
-
   const parseRecipients = (text: string): Recipient[] => {
     if (!text.trim()) return []
     const parts = text.split(/[\n,]/).map(p => p.trim()).filter(Boolean)
     const recipients: Recipient[] = []
-
     for (let i = 0; i < parts.length; i++) {
       const current = parts[i]
       if (isEmailFor(current)) {
@@ -285,7 +389,6 @@ export default function SendPage() {
     }
     return recipients
   }
-
   const handleParseRecipients = () => {
     const parsed = parseRecipients(recipientText)
     setRecipients(parsed)
@@ -295,13 +398,11 @@ export default function SendPage() {
       status: "pending",
     })))
   }
-
   const handleSingleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
       setSingleFile(e.target.files[0])
     }
   }
-
   const handlePerRecipientFileChange = (index: number, file: File | null) => {
     setRecipients((prev) => {
       const updated = [...prev]
@@ -309,16 +410,13 @@ export default function SendPage() {
       return updated
     })
   }
-
   const handleStartSending = async () => {
     if (!subject || !body || recipients.length === 0) {
       alert("Please fill in all required fields and add recipients")
       return
     }
-
     setIsSending(true)
     setStatuses((prev) => prev.map((s) => ({ ...s, status: "pending" })))
-
     try {
       const formData = new FormData()
       formData.append("senderEmail", senderEmail)
@@ -332,8 +430,10 @@ export default function SendPage() {
       formData.append("maxDelay", maxDelay)
       formData.append("shuffle", shuffle)
 
-      formData.append("recipients", JSON.stringify(recipients))
+      // ===== Spin Text =====
+      formData.append("spinGreeting", spinGreeting.toString())
 
+      formData.append("recipients", JSON.stringify(recipients))
       if (attachmentMode === "single" && singleFile) {
         formData.append("singleAttachment", singleFile)
       } else if (attachmentMode === "per-recipient") {
@@ -341,25 +441,19 @@ export default function SendPage() {
           if (r.file) formData.append(`attachment_${i}`, r.file)
         })
       }
-
       const response = await fetch("/api/send", {
         method: "POST",
         body: formData,
       })
-
       const data = await response.json()
-
       if (!response.ok) {
         alert("Error: " + (data.error || "Unknown error"))
         setIsSending(false)
         return
       }
-
       setJobId(data.jobId)
       clearDraft() // Clear draft after successful send start
-
       const eventSource = new EventSource(`/api/send?jobId=${data.jobId}`)
-
       eventSource.onmessage = (event) => {
         const update = JSON.parse(event.data)
         if (update.type === "progress") {
@@ -378,12 +472,10 @@ export default function SendPage() {
           eventSource.close()
         }
       }
-
       eventSource.onerror = () => {
         setIsSending(false)
         eventSource.close()
       }
-
       eventSourceRef.current = eventSource
     } catch (error) {
       console.error(error)
@@ -391,14 +483,12 @@ export default function SendPage() {
       setIsSending(false)
     }
   }
-
   const handleStop = () => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
     }
     setIsSending(false)
   }
-
   const handleClear = () => {
     setRecipients([])
     setRecipientText("")
@@ -412,11 +502,9 @@ export default function SendPage() {
       input.value = ""
     })
   }
-
   const successCount = statuses.filter((s) => s.status === "sent").length
   const errorCount = statuses.filter((s) => s.status === "error").length
   const isComplete = statuses.length > 0 && statuses.every((s) => s.status !== "pending" && s.status !== "sending")
-
   return (
     <main className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 p-4 sm:p-6 md:p-8">
       <div className="max-w-7xl mx-auto">
@@ -426,52 +514,106 @@ export default function SendPage() {
           </h1>
           <p className="text-sm sm:text-base text-muted-foreground">Send bulk emails with optional attachments</p>
         </div>
-
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           <div className="lg:col-span-2 space-y-4 sm:space-y-6">
             {/* Email Details */}
             <Card className="animate-slideInLeft">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-lg sm:text-xl">Email Details</CardTitle>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-blue-500 font-medium ">  Choose Template</label>
-                  <Select
-                    value={selectedTemplateId}
-                    onValueChange={handleTemplateSelect}
-                    disabled={loadingTemplates || templates.length === 0}
-                  >
-                    <SelectTrigger className="w-[220px]">
-                      <SelectValue placeholder={
-                        loadingTemplates
-                          ? "Loading Templates..."
-                          : templates.length === 0
-                            ? "No Templates Found"
-                            : "Select Template"
-                      } />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {templates.map((template) => (
-                        <SelectItem key={template.id} value={template.id}>
-                          {template.subject}
-                        </SelectItem>
-                      ))}
-                      {templates.length === 0 && !loadingTemplates && (
-                        <SelectItem value="none" disabled>No Templates Found</SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
+              <CardHeader className="space-y-3">
+                {/* FIRST ROW */}
+                <div className="flex flex-row items-center justify-between flex-wrap gap-3">
+                  <CardTitle className="text-lg sm:text-xl">Email Details</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-blue-500 font-medium">Choose Template</label>
+                    <Select
+                      value={selectedTemplateId}
+                      onValueChange={handleTemplateSelect}
+                      disabled={loadingTemplates || templates.length === 0}
+                    >
+                      <SelectTrigger className="w-[220px]">
+                        <SelectValue placeholder={
+                          loadingTemplates
+                            ? "Loading Templates..."
+                            : templates.length === 0
+                              ? "No Templates Found"
+                              : "Select Template"
+                        } />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {templates.map((template) => (
+                          <SelectItem key={template.id} value={template.id}>
+                            {template.subject}
+                          </SelectItem>
+                        ))}
+                        {templates.length === 0 && !loadingTemplates && (
+                          <SelectItem value="none" disabled>No Templates Found</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm text-blue-500 font-medium">Shuffle Sender</label>
+                    <Switch
+                      checked={shuffle}
+                      onChange={setShuffle}
+                      onColor="#2563eb"
+                      offColor="#9ca3af"
+                      height={22}
+                      width={46}
+                    />
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-blue-500 font-medium">Shuffle Sender</label>
-                  <Switch
-                    checked={shuffle}
-                    onChange={setShuffle}
-                    onColor="#2563eb"
-                    offColor="#9ca3af"
-                    height={22}
-                    width={46}
-                  />
-                </div>
+
+                {/* SECOND ROW – Spin Text */}
+                {/* SECOND ROW – Spin Text */}
+<div className="flex flex-col gap-2">
+  <div className="flex items-center gap-3 flex-wrap">
+    <div className="flex items-center gap-2">
+      <label className="text-sm text-blue-500 font-medium">Spin Text</label>
+     <Switch
+  checked={spinGreeting}
+  onChange={handleSpinGreetingToggle}
+  disabled={loadingSpinGreeting}
+  onColor="#2563eb"
+  offColor="#9ca3af"
+  height={22}
+  width={46}
+/>
+    </div>
+
+    {/* Input + tags visible ONLY when OFF */}
+    {!spinGreeting && (
+      <Input
+        value={newGreeting}
+        onChange={(e) => setNewGreeting(e.target.value)}
+        onKeyDown={handleAddGreeting}
+        placeholder="Type greeting and press Enter"
+        className="max-w-xs"
+      />
+    )}
+  </div>
+
+  {/* Show saved greetings as tags when OFF */}
+  {!spinGreeting && greetings.length > 0 && (
+    <div className="flex flex-wrap gap-2">
+      {greetings.map((g) => (
+        <span
+          key={g}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 text-sm dark:bg-blue-900/40 dark:text-blue-200"
+        >
+          {g}
+          <button
+            type="button"
+            onClick={() => handleDeleteGreeting(g)}
+            className="ml-0.5 hover:text-red-600 focus:outline-none"
+            aria-label={`Remove ${g}`}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </span>
+      ))}
+    </div>
+  )}
+</div>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div>
@@ -482,7 +624,6 @@ export default function SendPage() {
                     placeholder="Email subject"
                   />
                 </div>
-
                 <div>
                   <label className="block text-sm font-medium mb-2">Message Body</label>
                   <div className="border rounded-lg overflow-hidden">
@@ -492,15 +633,17 @@ export default function SendPage() {
                       onChange={setBody}
                       modules={quillModules}
                       formats={quillFormats}
-                      placeholder="Use {{name}} for recipient name token"
+                      placeholder="Use {{name}} for recipient name token. Use {{greeting}} when Spin Text is on."
                       style={{ height: "250px", marginBottom: "42px" }}
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-2">Tip: Use {'{{name}}'} to personalize emails</p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Tip: Use {'{{name}}'} to personalize emails
+                    {spinGreeting && <> · Use {'{{greeting}}'} for random greeting</>}
+                  </p>
                 </div>
               </CardContent>
             </Card>
-
             {/* Recipients */}
             <Card className="animate-slideInLeft">
               <CardHeader className="flex flex-row items-start justify-between pb-4">
@@ -529,7 +672,6 @@ export default function SendPage() {
                 <Button onClick={handleParseRecipients} variant="outline" className="w-full">
                   Parse Recipients ({recipients.length})
                 </Button>
-
                 <input
                   ref={csvFileInputRef}
                   type="file"
@@ -539,7 +681,6 @@ export default function SendPage() {
                 />
               </CardContent>
             </Card>
-
             {/* Attachments */}
             <Card className="animate-slideInLeft">
               <CardHeader>
@@ -558,7 +699,6 @@ export default function SendPage() {
                     </Button>
                   ))}
                 </div>
-
                 {attachmentMode === "single" && (
                   <div>
                     <label className="block text-sm font-medium mb-2">Upload Single File</label>
@@ -571,7 +711,6 @@ export default function SendPage() {
                     {singleFile && <p className="text-green-600 mt-2">Selected: {singleFile.name}</p>}
                   </div>
                 )}
-
                 {attachmentMode === "per-recipient" && recipients.length > 0 && (
                   <div className="space-y-2 max-h-48 overflow-y-auto">
                     {recipients.map((recipient, index) => (
@@ -590,7 +729,6 @@ export default function SendPage() {
                 )}
               </CardContent>
             </Card>
-
             {/* Send Settings */}
             <Card>
               <CardHeader>
@@ -608,7 +746,6 @@ export default function SendPage() {
                     width={46}
                   />
                 </div>
-
                 {!autoDelay ? (
                   <>
                     <label>Delay (ms)</label>
@@ -625,7 +762,6 @@ export default function SendPage() {
               </CardContent>
             </Card>
           </div>
-
           {/* Status Panel */}
           <div className="lg:col-span-1">
             <Card className="sticky top-20 lg:top-24">
@@ -641,18 +777,15 @@ export default function SendPage() {
                     <Pause className="w-4 h-4 mr-2" /> Stop
                   </Button>
                 </div>
-
                 <Button onClick={handleClear} variant="outline" className="w-full">
                   <Trash2 className="w-4 h-4 mr-2" /> Clear
                 </Button>
-
                 {isComplete && (
                   <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 rounded-lg">
                     <p className="font-medium text-green-700">Completed</p>
                     <p className="text-sm">{successCount} sent, {errorCount} failed</p>
                   </div>
                 )}
-
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {statuses.map((status, idx) => (
                     <div key={idx} className="text-xs p-3 bg-muted rounded-lg">
@@ -676,7 +809,6 @@ export default function SendPage() {
           </div>
         </div>
       </div>
-
       {/* CSV Preview Modal */}
       {showCsvPreview && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
@@ -685,7 +817,6 @@ export default function SendPage() {
               <h3 className="text-xl font-semibold">CSV Preview</h3>
               <p className="text-sm text-muted-foreground">{csvPreviewData.length} recipients found</p>
             </div>
-
             <div className="p-6 overflow-auto flex-1">
               <table className="w-full text-sm">
                 <thead className="bg-muted sticky top-0">
@@ -704,7 +835,6 @@ export default function SendPage() {
                 </tbody>
               </table>
             </div>
-
             <div className="p-6 border-t flex gap-3">
               <Button variant="outline" onClick={() => setShowCsvPreview(false)} className="flex-1">Cancel</Button>
               <Button

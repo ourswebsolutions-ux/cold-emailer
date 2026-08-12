@@ -322,38 +322,25 @@ export async function runWarmupCycle() {
 
 
 
-      await sendSMTPEmail({
+    await sendSMTPEmail({
+  host: account.host,
 
-        host:
-          account.host,
+  port: account.port,
 
-        port:
-          account.port,
+  username: account.username,
 
-        username:
-          account.username,
+  password: account.password,
 
-        password:
-          account.password,
+  from: account.senderEmail,
 
-        from:
-          account.senderEmail,
+  fromName: account.senderName || "Warmup",
 
-        fromName:
-          account.senderName ||
-          "Warmup",
+  to: receiver.username,
 
-        to:
-          receiver.username,
+  subject: template.subject,
 
-        subject:
-          template.subject,
-
-        text:
-          template.body || "",
-
-      });
-
+  html: template.body || "",
+});
 
 
 

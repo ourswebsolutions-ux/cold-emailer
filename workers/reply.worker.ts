@@ -1,7 +1,7 @@
 import { prisma } from "@/services/database/prisma";
 import { readInbox } from "@/services/smtp/imap.service";
 import { sendSMTPEmail } from "@/services/smtp/smtp.service";
-
+import { generateAIReply } from "@/lib/groq/reply";
 // ============================================================
 // IN-MEMORY PROCESSED MESSAGE TRACKING
 // No database required
@@ -16,15 +16,37 @@ const processedMessages = new Set<string>();
 async function generateReply(email: any) {
   console.log("🤖 Generating automatic reply...");
 
-  return `
-Hi,
+  const sender =
+    normalizeEmail(email.from?.value?.[0]?.address) ||
+    normalizeEmail(email.from) ||
+    "";
 
-Thanks for your reply.
+  const senderName =
+    email.from?.value?.[0]?.name ||
+    email.from?.name ||
+    "";
 
-We have received your message and will get back to you shortly.
+  const subject = String(email.subject || "").trim();
 
-Best regards
-`;
+  const body =
+    email.text ||
+    email.textBody ||
+    email.body ||
+    email.html ||
+    email.htmlBody ||
+    email.message ||
+    "";
+
+  const reply = await generateAIReply({
+    senderEmail: sender,
+    senderName: senderName || undefined,
+    subject,
+    body: String(body).trim(),
+    date: email.date,
+    messageId: getMessageId(email) || undefined,
+  });
+
+  return reply;
 }
 
 // ============================================================
@@ -33,8 +55,8 @@ Best regards
 // ============================================================
 
 function getRandomReplyDelay() {
-  const min = 10;
-  const max = 70;
+  const min = 1;
+  const max = 1;
 
   const minutes =
     Math.floor(Math.random() * (max - min + 1)) + min;
@@ -149,6 +171,8 @@ function shouldSkipEmail(email: any) {
     "slack.com",
     "discord.com",
     "zoom.us",
+    "mg.remote.co",
+    
   ];
 
   if (blockedDomains.includes(domain)) {
@@ -640,7 +664,7 @@ async function startReplyWorker() {
                 await generateReply(email);
 
               console.log(
-                "✅ Reply generated"
+                `✅ Reply generated ${reply} character(s)`
               );
 
               // ==================================================
@@ -693,7 +717,7 @@ async function startReplyWorker() {
                 from: system.username,
                 to: sender,
                 subject: replySubject,
-                text: reply,
+                html: reply,
                 username: system.username,
                 password: system.password,
               });
