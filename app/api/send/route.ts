@@ -132,15 +132,29 @@ async function validateRecipient(email: string): Promise<ValidationResult> {
   return res;
 }
 
-  const GREETINGS = [
-  "Hi",
-  "Hello",
-  "Hey"
-];
+// === spinGreeting related ===
+async function getSpinGreetings(userId: string) {
+  const greetings = await prisma.spinGreeting.findMany({
+    where: {
+      userId,
+      spixwork: true,
+    },
+    select: {
+      value: true,
+    },
+  });
 
-function randomGreeting() {
-  return GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+  return greetings.map((g) => g.value).filter(Boolean);
 }
+
+function randomGreeting(greetings: string[]) {
+  if (greetings.length === 0) {
+    return "Hi";
+  }
+
+  return greetings[Math.floor(Math.random() * greetings.length)];
+}
+// === end spinGreeting related ===
 
 export async function POST(request: NextRequest) {
   try {
@@ -153,6 +167,7 @@ export async function POST(request: NextRequest) {
     const minDelay = Number(formData.get("minDelay")) || 1;
     const maxDelay = Number(formData.get("maxDelay")) || 2;
     const shuffle = formData.get("shuffle") === "true";
+    const spinGreeting = formData.get("spinGreeting") === "true"; // === spinGreeting related ===
     const recipientsRaw = formData.get("recipients") as string;
     let recipients: Recipient[] = recipientsRaw ? JSON.parse(recipientsRaw) : [];
 
@@ -207,9 +222,20 @@ export async function POST(request: NextRequest) {
     const job: SendJob = { id: jobId, status: "running", updates: [], subscribers: new Set() };
     jobs.set(jobId, job);
 
-  
-
-    processSendJob(jobId, { subject, body, delay, autoDelay, minDelay, maxDelay, recipients, formData, smtpAccounts })
+    // === spinGreeting related: pass userId + spinGreeting ===
+    processSendJob(jobId, {
+      subject,
+      body,
+      delay,
+      autoDelay,
+      minDelay,
+      maxDelay,
+      recipients,
+      formData,
+      smtpAccounts,
+      spinGreeting,
+      userId,
+    })
       .catch((error) => {
         console.error("[v0] Send job error:", error);
         const currentJob = jobs.get(jobId);
@@ -236,6 +262,8 @@ async function processSendJob(
     autoDelay: boolean;
     minDelay: number;
     maxDelay: number;
+    spinGreeting: boolean; // === spinGreeting related ===
+    userId: string;        // === spinGreeting related ===
     recipients: Recipient[];
     formData: FormData;
     smtpAccounts: SMTPAccount[];
@@ -244,7 +272,14 @@ async function processSendJob(
   const job = jobs.get(jobId);
   if (!job) return;
 
-  const { subject, body, delay, autoDelay, minDelay, maxDelay, recipients, formData, smtpAccounts } = options;
+  const { subject, body, delay, autoDelay, minDelay, maxDelay, recipients, formData, smtpAccounts, spinGreeting, userId } = options;
+
+  // === spinGreeting related: fetch ONCE per job (not per recipient) ===
+  let greetings: string[] = [];
+  if (spinGreeting) {
+    greetings = await getSpinGreetings(userId);
+  }
+  // === end spinGreeting related ===
 
   let succeeded = 0;
   let failed = 0;
@@ -279,9 +314,19 @@ async function processSendJob(
     broadcastUpdate(job, { type: "progress", index: i, email, status: "sending" });
 
     try {
-      const personalizedBody = body
-  .replace(/\{\{greeting\}\}/g, randomGreeting())
-  .replace(/\{\{name\}\}/g, recipient.name || email.split("@")[0]);
+      // === spinGreeting related: random selection PER RECIPIENT only when enabled ===
+      let personalizedBody = body;
+      if (spinGreeting) {
+        personalizedBody = personalizedBody.replace(
+          /\{\{greeting\}\}/g,
+          randomGreeting(greetings) // uses "Hi" fallback when empty
+        );
+      }
+      personalizedBody = personalizedBody.replace(
+        /\{\{name\}\}/g,
+        recipient.name || email.split("@")[0]
+      );
+      // === end spinGreeting related ===
 
       const mailOptions: nodemailer.SendMailOptions = {
         from: senderName ? `${senderName} <${senderEmail}>` : senderEmail,

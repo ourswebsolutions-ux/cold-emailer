@@ -29,6 +29,7 @@ model SMTPConfig {
   userId      String
   host        String
   port        Int
+  spixwork Json?
   username    String
   password    String
   senderEmail String
@@ -161,4 +162,14 @@ enum EmailStatus {
   BOUNCED
   REPLIED
   UNSUBSCRIBED
+}
+
+model SpinGreeting {
+  id        String   @id @default(cuid())
+  userId    String
+  value     String
+  createdAt DateTime @default(now())
+  spixwork  Boolean? @default(false)
+  @@unique([userId, value])
+  @@index([userId])
 }

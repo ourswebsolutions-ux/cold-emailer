@@ -59,6 +59,7 @@
     "dotenv": "^17.4.2",
     "embla-carousel-react": "8.5.1",
     "eventsource": "^4.1.0",
+    "groq-sdk": "^1.5.0",
     "imap": "^0.8.19",
     "input-otp": "1.4.1",
     "jose": "^6.2.3",
