@@ -16,12 +16,15 @@ model User {
   status            UserStatus     @default(DISABLED)
   passwordExpiresAt DateTime
   sessionExpiresAt  DateTime?
+    
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
   smtpConfigs       SMTPConfig[]
     emails            Email[]
   systemConfig      SystemConfig[]
   emailTemplates EmailTemplate[]
+  inboxThreads   InboxThread[]
+  inboxFollowUps InboxFollowUp[]
 }
 
 model SMTPConfig {
@@ -38,6 +41,9 @@ provider     EmailProvider @default(SMTP)
 accessToken  String? @db.Text
 refreshToken String? @db.Text
 tokenExpiry  DateTime?
+imapHost   String?
+imapPort   Int?
+imapSecure Boolean @default(true)
   isActive    Boolean  @default(false)
   warmup      Boolean  @default(false)
   createdAt   DateTime @default(now())
@@ -45,7 +51,10 @@ tokenExpiry  DateTime?
 
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   emailHealth EmailHealth?
-
+  inboxThreads   InboxThread[]
+  inboxMessages  InboxMessage[]
+  inboxFollowUps InboxFollowUp[]
+  inboxSyncState InboxSyncState?
   @@unique([userId, senderEmail])
 }
 
@@ -178,6 +187,143 @@ model SpinGreeting {
   spixwork  Boolean? @default(false)
   @@unique([userId, value])
   @@index([userId])
+}
+
+// ==================================================
+// INBOX MODULE
+// ==================================================
+
+model InboxThread {
+  id               String    @id @default(cuid())
+  userId           String
+  smtpConfigId     String
+  providerThreadId String?   // Gmail threadId or IMAP conversation key
+  subject          String?   @db.Text
+  participants     Json?     // string[] of emails
+  lastMessageAt    DateTime?
+  unreadCount      Int       @default(0)
+  isStarred        Boolean   @default(false)
+  isArchived       Boolean   @default(false)
+  isDeleted        Boolean   @default(false)
+  snippet          String?   @db.Text
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  smtpConfig SMTPConfig      @relation(fields: [smtpConfigId], references: [id], onDelete: Cascade)
+  messages   InboxMessage[]
+  followUps  InboxFollowUp[]
+
+  @@unique([smtpConfigId, providerThreadId])
+  @@index([userId, smtpConfigId])
+  @@index([userId, lastMessageAt])
+  @@index([smtpConfigId, isArchived, isDeleted])
+}
+
+model InboxMessage {
+  id                String           @id @default(cuid())
+  threadId          String
+  smtpConfigId      String
+  providerMessageId String           // Gmail msg id or IMAP UID / Message-ID
+  inReplyTo         String?
+  references        String?          @db.Text
+  fromEmail         String
+  fromName          String?
+  toEmails          Json             // string[]
+  ccEmails          Json?
+  bccEmails         Json?
+  subject           String?          @db.Text
+  textBody          String?          @db.LongText
+  htmlBody          String?          @db.LongText
+  snippet           String?          @db.Text
+  receivedAt        DateTime?
+  sentAt            DateTime?
+  isRead            Boolean          @default(false)
+  isStarred         Boolean          @default(false)
+  direction         MessageDirection @default(INCOMING)
+  hasAttachments    Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  thread      InboxThread       @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  smtpConfig  SMTPConfig        @relation(fields: [smtpConfigId], references: [id], onDelete: Cascade)
+  attachments InboxAttachment[]
+  followUps   InboxFollowUp[]
+
+  @@unique([smtpConfigId, providerMessageId])
+  @@index([threadId, receivedAt])
+  @@index([smtpConfigId, isRead])
+}
+
+model InboxAttachment {
+  id                   String   @id @default(cuid())
+  messageId            String
+  filename             String
+  contentType          String?
+  size                 Int?
+  storagePath          String?
+  contentId            String?
+  providerAttachmentId String?
+  createdAt            DateTime @default(now())
+
+  message InboxMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+model InboxFollowUp {
+  id           String         @id @default(cuid())
+  userId       String
+  smtpConfigId String
+  threadId     String?
+  messageId    String?
+  toEmail      String
+  ccEmails     Json?
+  subject      String
+  body         String         @db.LongText
+  scheduledAt  DateTime
+  sentAt       DateTime?
+  status       FollowUpStatus @default(PENDING)
+  errorMessage String?        @db.Text
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  smtpConfig SMTPConfig    @relation(fields: [smtpConfigId], references: [id], onDelete: Cascade)
+  thread     InboxThread?  @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  message    InboxMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([status, scheduledAt])
+  @@index([userId, status])
+  @@index([smtpConfigId])
+}
+
+model InboxSyncState {
+  id           String    @id @default(cuid())
+  smtpConfigId String    @unique
+  lastSyncAt   DateTime?
+  historyId    String?   // Gmail
+  uidValidity  String?   // IMAP
+  lastUid      String?   // IMAP
+  cursor       String?
+  errorMessage String?   @db.Text
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  smtpConfig SMTPConfig @relation(fields: [smtpConfigId], references: [id], onDelete: Cascade)
+}
+
+enum MessageDirection {
+  INCOMING
+  OUTGOING
+}
+
+enum FollowUpStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
 }
 
 

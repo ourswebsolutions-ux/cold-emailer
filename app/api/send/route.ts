@@ -1,10 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import nodemailer from "nodemailer";
-import { PrismaClient } from "@prisma/client";
+// import { PrismaClient } from "@prisma/client";
 import dns from "dns/promises";
 import { sendGmailEmail } from "@/services/email/gmail.service";
-
+import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 interface SendJob {
