@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { PrismaClient, EmailStatus } from "@prisma/client";
-
+import {
+  
+  getCurrentUserId,
+  
+} from "@/lib/follow-up-api";
 const prisma = new PrismaClient();
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
 
-    const userId = searchParams.get("userId");
+        
+    const userId = await  getCurrentUserId()
 
     if (!userId) {
       return NextResponse.json(

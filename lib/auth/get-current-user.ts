@@ -1,5 +1,3 @@
-// lib/auth/get-current-user.ts
-
 import { cookies } from "next/headers";
 import { prisma } from "@/services/database/prisma";
 
