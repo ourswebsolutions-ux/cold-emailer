@@ -9,17 +9,22 @@ import { AlertCircle, CheckCircle2, Loader2, Trash2 } from "lucide-react"
 
 interface SMTPAccount {
   id: string
-  host: string
-  port: number
-  username: string
-  password: string
+  provider: "SMTP" | "GMAIL" | "OUTLOOK"
+  host?: string
+  port?: number
+  username?: string
+  password?: string
   senderEmail: string
   senderName?: string
   isActive: boolean
   createdAt: string
 }
 
+type AccountType = "SMTP" | "GMAIL" | "OUTLOOK"
+
 export default function EnvPage() {
+  const [accountType, setAccountType] = useState<AccountType>("SMTP")
+
   const [config, setConfig] = useState({
     host: "",
     port: "2525",
@@ -44,7 +49,7 @@ export default function EnvPage() {
   useEffect(() => {
     const getUserIdFromCookie = () => {
       const cookies = document.cookie.split("; ")
-      const userCookie = cookies.find(cookie => cookie.startsWith("userId="))
+      const userCookie = cookies.find((cookie) => cookie.startsWith("userId="))
       if (userCookie) {
         const id = userCookie.split("=")[1]
         setUserId(id)
@@ -52,19 +57,16 @@ export default function EnvPage() {
         console.warn("No userId cookie found. Please login.")
       }
     }
-
     getUserIdFromCookie()
   }, [])
 
-  // Fetch all SMTP accounts for current user
+  // Fetch all accounts for current user
   const fetchSMTPAccounts = async () => {
     if (!userId) return
-
     setIsLoadingAccounts(true)
     try {
       const response = await fetch(`/api/config?userId=${userId}`)
       const result = await response.json()
-
       if (result.success && Array.isArray(result.data)) {
         setSmtpAccounts(result.data)
       } else {
@@ -88,7 +90,7 @@ export default function EnvPage() {
     setConfig((prev) => ({ ...prev, [name]: value }))
   }
 
-  // Always create NEW account
+  // Always create NEW SMTP account
   const handleSave = async () => {
     if (!userId) {
       setSaveMessage("Please login first")
@@ -104,6 +106,7 @@ export default function EnvPage() {
 
     try {
       const payload = {
+        provider: "SMTP",
         host: config.host,
         port: config.port,
         username: config.username,
@@ -122,7 +125,7 @@ export default function EnvPage() {
 
       if (response.ok && result.success) {
         setSaveMessage("New SMTP account created successfully")
-        
+
         // Clear form
         setConfig({
           host: "",
@@ -150,7 +153,10 @@ export default function EnvPage() {
     if (!config.host || !config.username || !config.password) {
       setTestMessage("Please fill host, username and password")
       setTestStatus("error")
-      setTimeout(() => { setTestStatus("idle"); setTestMessage(""); }, 3000)
+      setTimeout(() => {
+        setTestStatus("idle")
+        setTestMessage("")
+      }, 3000)
       return
     }
 
@@ -188,16 +194,13 @@ export default function EnvPage() {
 
   const handleActivate = async (id: string) => {
     if (!userId) return
-
     try {
       const response = await fetch("/api/config/activate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, userId }),
       })
-
       const result = await response.json()
-
       if (result.success) {
         await fetchSMTPAccounts()
       }
@@ -207,16 +210,13 @@ export default function EnvPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this SMTP account?")) return
-
+    if (!confirm("Delete this account?")) return
     setIsDeleting(id)
     try {
       const response = await fetch(`/api/config?id=${id}`, {
         method: "DELETE",
       })
-
       const result = await response.json()
-
       if (result.success) {
         await fetchSMTPAccounts()
       } else {
@@ -227,6 +227,26 @@ export default function EnvPage() {
       alert("Failed to delete account")
     } finally {
       setIsDeleting(null)
+    }
+  }
+
+  const handleConnectGmail = () => {
+    window.location.href = "/api/auth/google"
+  }
+
+  const handleConnectOutlook = () => {
+    window.location.href = "/api/auth/microsoft"
+  }
+
+  const getProviderBadgeClasses = (provider: string) => {
+    switch (provider) {
+      case "GMAIL":
+        return "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+      case "OUTLOOK":
+        return "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+      case "SMTP":
+      default:
+        return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
     }
   }
 
@@ -258,11 +278,11 @@ export default function EnvPage() {
               <CardContent>
                 {!userId ? (
                   <p className="text-red-500 text-sm py-8 text-center">
-                    Please login to manage SMTP accounts
+                    Please login to manage email accounts
                   </p>
                 ) : smtpAccounts.length === 0 ? (
                   <p className="text-muted-foreground text-sm py-8 text-center">
-                    No SMTP accounts yet. Create one below.
+                    No email accounts yet. Create one below.
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -270,8 +290,8 @@ export default function EnvPage() {
                       <div
                         key={account.id}
                         className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all duration-200 group ${
-                          account.isActive 
-                            ? "border-primary bg-primary/5" 
+                          account.isActive
+                            ? "border-primary bg-primary/5"
                             : "border-transparent hover:border-border hover:bg-muted/50"
                         }`}
                       >
@@ -283,9 +303,22 @@ export default function EnvPage() {
                           className="w-4 h-4 accent-primary cursor-pointer"
                         />
                         <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm text-foreground truncate">{account.senderEmail}</p>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <p className="font-medium text-sm text-foreground truncate">
+                              {account.senderEmail}
+                            </p>
+                            <span
+                              className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${getProviderBadgeClasses(
+                                account.provider || "SMTP"
+                              )}`}
+                            >
+                              {account.provider || "SMTP"}
+                            </span>
+                          </div>
                           {account.senderName && (
-                            <p className="text-xs text-muted-foreground truncate">{account.senderName}</p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {account.senderName}
+                            </p>
                           )}
                         </div>
                         <Button
@@ -303,147 +336,269 @@ export default function EnvPage() {
                 )}
 
                 <div className="mt-6 pt-6 border-t border-border">
-  <div className="space-y-4">
-    <h3 className="text-sm font-semibold text-foreground">
-      SMTP Configuration Guide
-    </h3>
-
-    <ol className="text-xs text-muted-foreground space-y-3 list-decimal list-inside">
-      <li>
-        <strong className="text-foreground">SMTP Host:</strong> Enter{" "}
-        <code className="px-1 py-0.5 bg-muted rounded">smtp.gmail.com</code>
-      </li>
-
-      <li>
-        <strong className="text-foreground">SMTP Port:</strong> Use port{" "}
-        <code className="px-1 py-0.5 bg-muted rounded">587</code>
-      </li>
-
-      <li>
-        <strong className="text-foreground">Username / Email:</strong> Enter
-        your Gmail account email address (example: yourname@gmail.com)
-      </li>
-
-      <li>
-        <strong className="text-foreground">Password / App Password:</strong>{" "}
-        Use a Gmail App Password instead of your normal Gmail password.
-        <br />
-        To create an App Password:
-        <ul className="mt-2 ml-5 list-disc space-y-1">
-          <li>
-            Open your Google Account:
-            <span className="text-foreground"> Manage your Google Account</span>
-          </li>
-          <li>
-            Go to <span className="text-foreground">Security</span>
-          </li>
-          <li>
-            Enable <span className="text-foreground">2-Step Verification</span>{" "}
-            (required)
-          </li>
-          <li>
-            Open{" "}
-            <span className="text-foreground">
-              App Passwords
-            </span>
-          </li>
-          <li>
-            Create a new app password (select Mail or Other)
-          </li>
-          <li>
-            Copy the generated 16-character password and paste it here
-          </li>
-        </ul>
-      </li>
-
-      <li>
-        <strong className="text-foreground">Sender Email:</strong> Use the same
-        Gmail address you configured above.
-      </li>
-
-      <li>
-        <strong className="text-foreground">Sender Name:</strong> Enter your
-        preferred display name (example: Your Company Name or Your Name).
-      </li>
-
-      <li>
-        <strong className="text-foreground">Activate Account:</strong> After
-        saving the SMTP account, click the radio button next to the account to
-        make it active. The active account will be used for sending emails.
-      </li>
-    </ol>
-  </div>
-</div>
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-foreground">
+                      SMTP Configuration Guide
+                    </h3>
+                    <ol className="text-xs text-muted-foreground space-y-3 list-decimal list-inside">
+                      <li>
+                        <strong className="text-foreground">SMTP Host:</strong> Enter{" "}
+                        <code className="px-1 py-0.5 bg-muted rounded">smtp.gmail.com</code>
+                      </li>
+                      <li>
+                        <strong className="text-foreground">SMTP Port:</strong> Use port{" "}
+                        <code className="px-1 py-0.5 bg-muted rounded">587</code>
+                      </li>
+                      <li>
+                        <strong className="text-foreground">Username / Email:</strong> Enter
+                        your Gmail account email address (example: yourname@gmail.com)
+                      </li>
+                      <li>
+                        <strong className="text-foreground">Password / App Password:</strong>{" "}
+                        Use a Gmail App Password instead of your normal Gmail password.
+                        <br />
+                        To create an App Password:
+                        <ul className="mt-2 ml-5 list-disc space-y-1">
+                          <li>
+                            Open your Google Account:
+                            <span className="text-foreground"> Manage your Google Account</span>
+                          </li>
+                          <li>
+                            Go to <span className="text-foreground">Security</span>
+                          </li>
+                          <li>
+                            Enable <span className="text-foreground">2-Step Verification</span>{" "}
+                            (required)
+                          </li>
+                          <li>
+                            Open{" "}
+                            <span className="text-foreground">App Passwords</span>
+                          </li>
+                          <li>Create a new app password (select Mail or Other)</li>
+                          <li>
+                            Copy the generated 16-character password and paste it here
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <strong className="text-foreground">Sender Email:</strong> Use the same
+                        Gmail address you configured above.
+                      </li>
+                      <li>
+                        <strong className="text-foreground">Sender Name:</strong> Enter your
+                        preferred display name (example: Your Company Name or Your Name).
+                      </li>
+                      <li>
+                        <strong className="text-foreground">Activate Account:</strong> After
+                        saving the account, click the radio button next to the account to make
+                        it active. The active account will be used for sending emails.
+                      </li>
+                    </ol>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>
 
-          {/* RIGHT COLUMN - SMTP Settings Form */}
+          {/* RIGHT COLUMN - Add New Account */}
           <div className="lg:col-span-2 space-y-6">
             <Card className="rounded-2xl shadow-lg border border-border/50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl">
               <CardHeader className="pb-6">
                 <CardTitle className="text-xl flex items-center gap-2">
-                  Add New SMTP Account
+                  Add New Email Account
                   {isLoadingConfig && <Loader2 className="w-4 h-4 animate-spin" />}
                 </CardTitle>
                 <CardDescription>
-                  Fill the form and click Save to create a new account. Previous accounts are preserved.
+                  Choose an account type and connect or configure it. Previous accounts are
+                  preserved.
                 </CardDescription>
               </CardHeader>
+
               <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">SMTP Host</label>
-                    <Input name="host" value={config.host} onChange={handleChange} placeholder="smtp.gmail.com" className="w-full" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">SMTP Port</label>
-                    <Input name="port" value={config.port} onChange={handleChange} placeholder="587" className="w-full" />
-                  </div>
+                {/* Account type selector */}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant={accountType === "SMTP" ? "default" : "outline"}
+                    onClick={() => setAccountType("SMTP")}
+                    className="rounded-xl"
+                  >
+                    SMTP
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={accountType === "GMAIL" ? "default" : "outline"}
+                    onClick={() => setAccountType("GMAIL")}
+                    className="rounded-xl"
+                  >
+                    Connect Gmail
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={accountType === "OUTLOOK" ? "default" : "outline"}
+                    onClick={() => setAccountType("OUTLOOK")}
+                    className="rounded-xl"
+                  >
+                    Connect Outlook
+                  </Button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Username / Email</label>
-                    <Input name="username" value={config.username} onChange={handleChange} placeholder="your@email.com" className="w-full" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Password / App Password</label>
-                    <Input name="password" type="password" value={config.password} onChange={handleChange} placeholder="••••••••" className="w-full" />
-                  </div>
-                </div>
+                {/* SMTP mode */}
+                {accountType === "SMTP" && (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-2">
+                          SMTP Host
+                        </label>
+                        <Input
+                          name="host"
+                          value={config.host}
+                          onChange={handleChange}
+                          placeholder="smtp.gmail.com"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-2">
+                          SMTP Port
+                        </label>
+                        <Input
+                          name="port"
+                          value={config.port}
+                          onChange={handleChange}
+                          placeholder="587"
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Sender Email</label>
-                    <Input name="senderEmail" value={config.senderEmail} onChange={handleChange} placeholder="sender@example.com" className="w-full" />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-2">
+                          Username / Email
+                        </label>
+                        <Input
+                          name="username"
+                          value={config.username}
+                          onChange={handleChange}
+                          placeholder="your@email.com"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-2">
+                          Password / App Password
+                        </label>
+                        <Input
+                          name="password"
+                          type="password"
+                          value={config.password}
+                          onChange={handleChange}
+                          placeholder="••••••••"
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-2">
+                          Sender Email
+                        </label>
+                        <Input
+                          name="senderEmail"
+                          value={config.senderEmail}
+                          onChange={handleChange}
+                          placeholder="sender@example.com"
+                          className="w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-foreground mb-2">
+                          Sender Name (Optional)
+                        </label>
+                        <Input
+                          name="senderName"
+                          value={config.senderName}
+                          onChange={handleChange}
+                          placeholder="John Doe"
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Gmail OAuth mode */}
+                {accountType === "GMAIL" && (
+                  <div className="rounded-2xl border border-border/60 bg-muted/30 p-6 space-y-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-foreground">Connect Gmail</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Connect your Gmail account securely using Google OAuth.
+                        <br />
+                        No Gmail password is required.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={handleConnectGmail}
+                      disabled={!userId}
+                      className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl py-5 px-6"
+                    >
+                      Connect Google Account
+                    </Button>
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-foreground mb-2">Sender Name (Optional)</label>
-                    <Input name="senderName" value={config.senderName} onChange={handleChange} placeholder="John Doe" className="w-full" />
+                )}
+
+                {/* Outlook OAuth mode */}
+                {accountType === "OUTLOOK" && (
+                  <div className="rounded-2xl border border-border/60 bg-muted/30 p-6 space-y-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-foreground">Connect Outlook</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Connect your Microsoft account securely using OAuth.
+                        <br />
+                        No Outlook password is required.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={handleConnectOutlook}
+                      disabled={!userId}
+                      className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl py-5 px-6"
+                    >
+                      Connect Microsoft Account
+                    </Button>
                   </div>
-                </div>
+                )}
               </CardContent>
             </Card>
 
-            <div className="flex flex-col sm:flex-row gap-4">
-              <Button
-                onClick={handleSave}
-                disabled={!userId}
-                className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 py-6 rounded-2xl text-base font-medium"
-              >
-                Save New SMTP Account
-              </Button>
-              <Button
-                onClick={handleTestSMTP}
-                variant="outline"
-                disabled={testStatus === "testing" || !userId}
-                className="flex-1 transition-all duration-200 py-6 rounded-2xl text-base font-medium border-2 hover:bg-muted"
-              >
-                {testStatus === "testing" && <Loader2 className="w-5 h-5 mr-2 animate-spin" />}
-                Test SMTP
-              </Button>
-            </div>
+            {/* SMTP-only action buttons */}
+            {accountType === "SMTP" && (
+              <div className="flex flex-col sm:flex-row gap-4">
+                <Button
+                  onClick={handleSave}
+                  disabled={!userId}
+                  className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200 py-6 rounded-2xl text-base font-medium"
+                >
+                  Save New SMTP Account
+                </Button>
+                <Button
+                  onClick={handleTestSMTP}
+                  variant="outline"
+                  disabled={testStatus === "testing" || !userId}
+                  className="flex-1 transition-all duration-200 py-6 rounded-2xl text-base font-medium border-2 hover:bg-muted"
+                >
+                  {testStatus === "testing" && (
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  )}
+                  Test SMTP
+                </Button>
+              </div>
+            )}
 
             {saveMessage && (
               <div className="p-4 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-900/60 rounded-2xl text-green-800 dark:text-green-300 text-sm flex items-center gap-3">
@@ -453,7 +608,13 @@ export default function EnvPage() {
             )}
 
             {testStatus !== "idle" && (
-              <Card className={testStatus === "success" ? "border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-900/20 rounded-2xl" : "border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 rounded-2xl"}>
+              <Card
+                className={
+                  testStatus === "success"
+                    ? "border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-900/20 rounded-2xl"
+                    : "border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-900/20 rounded-2xl"
+                }
+              >
                 <CardContent className="pt-6 flex items-start gap-3">
                   {testStatus === "success" ? (
                     <CheckCircle2 className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
@@ -461,7 +622,13 @@ export default function EnvPage() {
                     <AlertCircle className="w-6 h-6 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
                   )}
                   <div>
-                    <p className={testStatus === "success" ? "text-green-800 dark:text-green-300 font-medium" : "text-red-800 dark:text-red-300 font-medium"}>
+                    <p
+                      className={
+                        testStatus === "success"
+                          ? "text-green-800 dark:text-green-300 font-medium"
+                          : "text-red-800 dark:text-red-300 font-medium"
+                      }
+                    >
                       {testMessage}
                     </p>
                   </div>
@@ -471,14 +638,24 @@ export default function EnvPage() {
 
             <Card className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-900/50 rounded-2xl">
               <CardHeader className="pb-">
-                <CardTitle className="text-amber-900 dark:text-amber-200 text-lg">Security Notice</CardTitle>
+                <CardTitle className="text-amber-900 dark:text-amber-200 text-lg">
+                  Security Notice
+                </CardTitle>
               </CardHeader>
               <CardContent className="text-sm text-amber-800 dark:text-amber-300 space-y-3">
-            <p>This software is built with security and reliability as a top priority and is intended for legitimate and authorized use only. It follows industry-standard practices to ensure safe and responsible operation.</p>
-
-<p>All sensitive information is handled securely and stored using protected database systems with appropriate security measures in place.</p>
-
-<p>We are committed to maintaining user privacy, data protection, and system integrity at all times.</p>
+                <p>
+                  This software is built with security and reliability as a top priority and is
+                  intended for legitimate and authorized use only. It follows industry-standard
+                  practices to ensure safe and responsible operation.
+                </p>
+                <p>
+                  All sensitive information is handled securely and stored using protected
+                  database systems with appropriate security measures in place.
+                </p>
+                <p>
+                  We are committed to maintaining user privacy, data protection, and system
+                  integrity at all times.
+                </p>
               </CardContent>
             </Card>
           </div>
