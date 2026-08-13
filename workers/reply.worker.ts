@@ -234,7 +234,7 @@ async function startReplyWorker() {
       // ========================================================
 
       const smtpConfigs =
-        await prisma.sMTPConfig.findMany({
+        await prisma.systemConfig.findMany({
           where: {
             isActive: true,
           },
