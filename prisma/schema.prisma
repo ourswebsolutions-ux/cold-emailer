@@ -141,6 +141,7 @@ model EmailHealth {
   totalReplies     Int      @default(0)
 
   todaySent        Int      @default(0)
+  nextWarmupAt DateTime?
   todayReplies     Int      @default(0)
 
   health           Int      @default(0)
