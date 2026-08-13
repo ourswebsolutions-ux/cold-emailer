@@ -1,4 +1,5 @@
 import { PrismaClient, Prisma } from "@prisma/client";
+import { sendSMTPEmail } from "@/services/smtp/smtp.service";
 import type { ProcessResult, VariableContext } from "./follow-up.types";
 import {
   isWithinSendingWindow,
@@ -6,6 +7,14 @@ import {
   replaceVariables,
   maybeCompleteCampaign,
 } from "./follow-up.service";
+
+import {
+  prisma,
+  getCurrentUserId,
+  jsonOk,
+  jsonError,
+  unauthorized,
+} from "@/lib/follow-up-api";
 
 /**
  * Adapter for the project's existing email sending service.
@@ -44,57 +53,62 @@ export type SendEmailResult = {
 export async function sendCampaignEmail(
   payload: SendEmailPayload
 ): Promise<SendEmailResult> {
-  // Attempt dynamic import of common project paths so this module
-  // works once dropped into the real codebase without further edits.
-  const candidates = [
-    "@/lib/email",
-    "@/lib/email/send",
-    "@/services/email",
-    "@/services/email.service",
-    "@/lib/mailer",
-    "@/utils/email",
-  ];
+  try {
+    const smtpConfig = await prisma.smtpConfig.findUnique({
+      where: {
+        id: payload.smtpConfigId,
+      },
+    });
 
-  for (const path of candidates) {
-    try {
-      // @ts-expect-error dynamic path
-      const mod = await import(path);
-      const fn =
-        mod.sendEmail ||
-        mod.sendMail ||
-        mod.default?.sendEmail ||
-        mod.default;
-      if (typeof fn === "function") {
-        const result = await fn({
-          smtpConfigId: payload.smtpConfigId,
-          to: payload.to,
-          toName: payload.toName,
-          subject: payload.subject,
-          html: payload.html ?? payload.text.replace(/\n/g, "<br/>"),
-          text: payload.text,
-          userId: payload.userId,
-        });
-        if (result && typeof result === "object") {
-          return {
-            success: result.success !== false && !result.error,
-            messageId: result.messageId || result.id,
-            error: result.error,
-          };
-        }
-        return { success: true };
-      }
-    } catch {
-      // try next candidate
+    if (!smtpConfig) {
+      return {
+        success: false,
+        error: "SMTP configuration not found",
+      };
     }
-  }
 
-  // If no existing sender is found, fail the step rather than silently
-  // pretending success. Wire your real sender above.
-  return {
-    success: false,
-    error:
-      "No existing email sending service found. Wire sendCampaignEmail to your project sender.",
-  };
+    if (
+      !smtpConfig.host ||
+      !smtpConfig.port ||
+      !smtpConfig.username ||
+      !smtpConfig.password
+    ) {
+      return {
+        success: false,
+        error: "SMTP configuration is incomplete",
+      };
+    }
+
+    await sendSMTPEmail({
+      host: smtpConfig.host,
+      port: smtpConfig.port,
+      username: smtpConfig.username,
+      password: smtpConfig.password,
+
+      from: smtpConfig.senderEmail,
+      fromName: smtpConfig.senderName || "Axoraweb Solutions",
+
+      to: payload.to,
+
+      subject: payload.subject,
+
+      html:
+        payload.html ||
+        payload.text.replace(/\n/g, "<br />"),
+    });
+
+    return {
+      success: true,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to send email",
+    };
+  }
 }
 
 const BATCH_SIZE = 25;
