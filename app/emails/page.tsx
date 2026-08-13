@@ -257,33 +257,60 @@ const valid = contacts.filter(c =>
   };
 
   const importContacts = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const text = ev.target?.result as string;
-      const rows = text.split('\n').slice(1);
-      const newContacts: any[] = [];
-      rows.forEach(row => {
-        if (!row.trim()) return;
-        const [name, email, phone, website, category] = row.split(',').map(s => s.trim().replace(/"/g, ''));
-        if (email && name && category && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-          newContacts.push({ name, email, phone: phone || '', website: website || '', category });
-        }
-      });
-      if (newContacts.length) {
-        await fetch('/api/email', { 
-          method: 'POST', 
-          headers: {'Content-Type': 'application/json'}, 
-          body: JSON.stringify({ userId, listId, contacts: newContacts }) 
+  const file = e.target.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+
+  reader.onload = async (ev) => {
+    const text = ev.target?.result as string;
+    const rows = text.split('\n').slice(1);
+    const newContacts: any[] = [];
+
+    rows.forEach(row => {
+      if (!row.trim()) return;
+
+      const [name, email, phone, website, category] = row
+        .split(',')
+        .map(s => s.trim().replace(/"/g, ''));
+
+      // Name + Email required, baqi optional
+      if (
+        name &&
+        email &&
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+      ) {
+        newContacts.push({
+          name,
+          email,
+          phone: phone || '',
+          website: website || '',
+          category: category || '',
         });
-        fetchContacts();
-        showToast('Import successful');
       }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
+    });
+
+    if (newContacts.length) {
+      await fetch('/api/email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId,
+          listId,
+          contacts: newContacts,
+        }),
+      });
+
+      fetchContacts();
+      showToast('Import successful');
+    }
   };
+
+  reader.readAsText(file);
+  e.target.value = '';
+};
 
   const exportCSV = (mode: 'all' | 'sending') => {
     if (selected.size === 0) {
