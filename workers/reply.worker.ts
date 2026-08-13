@@ -2,125 +2,47 @@ import { prisma } from "@/services/database/prisma";
 import { readInbox } from "@/services/smtp/imap.service";
 import { sendSMTPEmail } from "@/services/smtp/smtp.service";
 import { generateAIReply } from "@/lib/groq/reply";
+
 // ============================================================
 // IN-MEMORY PROCESSED MESSAGE TRACKING
-// No database required
 // ============================================================
 
 const processedMessages = new Set<string>();
 
 // ============================================================
-// GENERATE REPLY
+// HELPERS
 // ============================================================
 
-async function generateReply(email: any) {
-  console.log("🤖 Generating automatic reply...");
-
-  const sender =
-    normalizeEmail(email.from?.value?.[0]?.address) ||
-    normalizeEmail(email.from) ||
-    "";
-
-  const senderName =
-    email.from?.value?.[0]?.name ||
-    email.from?.name ||
-    "";
-
-  const subject = String(email.subject || "").trim();
-
-  const body =
-    email.text ||
-    email.textBody ||
-    email.body ||
-    email.html ||
-    email.htmlBody ||
-    email.message ||
-    "";
-
-  const reply = await generateAIReply({
-    senderEmail: sender,
-    senderName: senderName || undefined,
-    subject,
-    body: String(body).trim(),
-    date: email.date,
-    messageId: getMessageId(email) || undefined,
-  });
-
-  return reply;
+function normalizeEmail(value?: string) {
+  return String(value || "").toLowerCase().trim();
 }
 
-// ============================================================
-// REPLY DELAY
-// TESTING: 1 MINUTE
-// ============================================================
-
-function getRandomReplyDelay() {
-  const min = 1;
-  const max = 1;
-
-  const minutes =
-    Math.floor(Math.random() * (max - min + 1)) + min;
-
-  console.log(
-    `⏱️ Reply delay selected: ${minutes} minute(s)`
-  );
-
-  return {
-    minutes,
-    milliseconds: minutes * 60 * 1000,
-  };
+function getMessageId(email: any) {
+  return String(
+    email.messageId ||
+      email.headers?.["message-id"] ||
+      email.headers?.["Message-ID"] ||
+      ""
+  ).trim();
 }
-
-// ============================================================
-// SLEEP
-// ============================================================
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ============================================================
-// NORMALIZE EMAIL
-// ============================================================
-
-function normalizeEmail(value?: string) {
-  return value?.toLowerCase().trim() || "";
-}
-
-// ============================================================
-// GET MESSAGE ID
-// ============================================================
-
-function getMessageId(email: any) {
-  const messageId =
-    email.messageId ||
-    email.headers?.["message-id"] ||
-    email.headers?.["Message-ID"] ||
-    "";
-
-  return String(messageId).trim();
-}
-
-// ============================================================
-// CHECK AUTOMATED / UNWANTED SENDERS
+// CHECK IF EMAIL IS AUTOMATED
 // ============================================================
 
 function shouldSkipEmail(email: any) {
   const sender = normalizeEmail(
-    email.from?.value?.[0]?.address
+    email.from?.value?.[0]?.address ||
+      email.from?.address ||
+      email.from
   );
 
-  console.log("🔎 Checking sender:", sender);
-
   if (!sender) {
-    console.log("❌ Sender email is missing");
-    return true;
-  }
-
-  const domain = sender.split("@")[1];
-
-  if (!domain) {
-    console.log("❌ Sender domain is missing");
+    console.log("❌ Sender email missing");
     return true;
   }
 
@@ -141,18 +63,6 @@ function shouldSkipEmail(email: any) {
     "alert",
   ];
 
-  const blocked = blockedKeywords.some((keyword) =>
-    sender.includes(keyword)
-  );
-
-  if (blocked) {
-    console.log(
-      `⏭️ Automated sender blocked: ${sender}`
-    );
-
-    return true;
-  }
-
   const blockedDomains = [
     "facebook.com",
     "facebookmail.com",
@@ -161,7 +71,6 @@ function shouldSkipEmail(email: any) {
     "instagram.com",
     "twitter.com",
     "x.com",
-    "em.linkedin.com",
     "tiktok.com",
     "youtube.com",
     "google.com",
@@ -172,191 +81,140 @@ function shouldSkipEmail(email: any) {
     "discord.com",
     "zoom.us",
     "mg.remote.co",
-    
   ];
 
-  if (blockedDomains.includes(domain)) {
+  if (
+    blockedKeywords.some((keyword) =>
+      sender.includes(keyword)
+    )
+  ) {
     console.log(
-      `⏭️ Automated/social domain blocked: ${domain}`
+      `⏭️ Automated sender skipped: ${sender}`
     );
 
     return true;
   }
 
-  console.log(
-    `✅ Sender passed basic filter: ${sender}`
-  );
+  const domain = sender.split("@")[1];
+
+  if (domain && blockedDomains.includes(domain)) {
+    console.log(
+      `⏭️ Blocked domain skipped: ${domain}`
+    );
+
+    return true;
+  }
 
   return false;
 }
 
 // ============================================================
-// DECIDE WHETHER AUTO REPLY IS ALLOWED
+// CHECK IF EMAIL SHOULD BE REPLIED TO
 // ============================================================
 
-function shouldAutoReply(email: any) {
-  console.log("");
-  console.log("🔎 AUTO-REPLY RULE CHECK");
+function shouldReplyToEmail(email: any) {
+  const messageId = getMessageId(email);
 
   const sender = normalizeEmail(
-    email.from?.value?.[0]?.address
+    email.from?.value?.[0]?.address ||
+      email.from?.address ||
+      email.from
   );
+
+  const subject = String(
+    email.subject || ""
+  ).trim();
+
+  console.log("");
+  console.log("🔎 CHECKING INCOMING EMAIL");
+  console.log("📧 Sender:", sender);
+  console.log("📋 Subject:", subject);
+  console.log("🆔 Message ID:", messageId || "N/A");
 
   if (!sender) {
     console.log("❌ No sender");
     return false;
   }
 
-  // ----------------------------------------------------------
-  // Skip if no valid message ID
-  // ----------------------------------------------------------
-
-  const messageId = getMessageId(email);
-
-  if (!messageId) {
-    console.log(
-      "⚠️ Message ID not available"
-    );
-
-    // We can still process the email.
-    // The limitation is that duplicate protection
-    // cannot work for this message.
-  }
-
-  // ----------------------------------------------------------
-  // Check duplicate
-  // ----------------------------------------------------------
-
   if (
     messageId &&
     processedMessages.has(messageId)
   ) {
     console.log(
-      "⏭️ Message already processed in this worker session"
-    );
-
-    console.log(
-      "🆔 Message ID:",
-      messageId
+      "⏭️ Already processed"
     );
 
     return false;
   }
-
-  // ----------------------------------------------------------
-  // Skip automated senders
-  // ----------------------------------------------------------
 
   if (shouldSkipEmail(email)) {
-    console.log(
-      "⏭️ Auto-reply denied because sender is automated"
-    );
-
     return false;
   }
-
-  // ----------------------------------------------------------
-  // Require a recognizable subject
-  // ----------------------------------------------------------
-
-  const subject =
-    String(email.subject || "").trim();
 
   if (!subject) {
     console.log(
-      "⏭️ Auto-reply skipped: subject is empty"
+      "⏭️ Subject missing"
     );
 
     return false;
   }
 
   console.log(
-    "✅ Auto-reply rules passed"
-  );
-
-  console.log(
-    "📧 Sender:",
-    sender
-  );
-
-  console.log(
-    "📋 Subject:",
-    subject
+    "✅ EMAIL IS ELIGIBLE FOR REPLY"
   );
 
   return true;
 }
 
 // ============================================================
-// MARK MESSAGE AS PROCESSED
+// GENERATE AI REPLY
 // ============================================================
 
-function markMessageProcessed(email: any) {
-  const messageId = getMessageId(email);
-
-  if (!messageId) {
-    console.log(
-      "⚠️ Cannot mark message as processed: Message ID missing"
-    );
-
-    return;
-  }
-
-  processedMessages.add(messageId);
-
-  console.log("");
-  console.log(
-    "💾 MESSAGE MARKED AS PROCESSED"
+async function generateReply(email: any) {
+  const sender = normalizeEmail(
+    email.from?.value?.[0]?.address ||
+      email.from?.address ||
+      email.from
   );
 
-  console.log(
-    "🆔 Message ID:",
-    messageId
-  );
+  const senderName =
+    email.from?.value?.[0]?.name ||
+    email.from?.name ||
+    "";
 
-  console.log(
-    "📊 Processed messages in memory:",
-    processedMessages.size
-  );
+  const subject = String(
+    email.subject || ""
+  ).trim();
+
+  const body =
+    email.text ||
+    email.textBody ||
+    email.body ||
+    email.html ||
+    email.htmlBody ||
+    email.message ||
+    "";
+
+  return generateAIReply({
+    senderEmail: sender,
+    senderName: senderName || undefined,
+    subject,
+    body: String(body).trim(),
+    date: email.date,
+    messageId: getMessageId(email) || undefined,
+  });
 }
 
 // ============================================================
-// CLEAN OLD IN-MEMORY DATA
+// MARK PROCESSED
 // ============================================================
 
-function cleanupProcessedMessages() {
-  // Keep memory usage bounded.
-  // This is only runtime protection.
-  const MAX_PROCESSED_MESSAGES = 5000;
+function markProcessed(email: any) {
+  const messageId = getMessageId(email);
 
-  if (
-    processedMessages.size <=
-    MAX_PROCESSED_MESSAGES
-  ) {
-    return;
+  if (messageId) {
+    processedMessages.add(messageId);
   }
-
-  console.log(
-    "🧹 Cleaning processed message memory..."
-  );
-
-  const messages =
-    Array.from(processedMessages);
-
-  processedMessages.clear();
-
-  // Keep the newest portion
-  const keepCount = 2500;
-
-  messages
-    .slice(-keepCount)
-    .forEach((messageId) => {
-      processedMessages.add(messageId);
-    });
-
-  console.log(
-    `✅ Processed message memory cleaned. Current size: ${processedMessages.size}`
-  );
 }
 
 // ============================================================
@@ -365,145 +223,83 @@ function cleanupProcessedMessages() {
 
 async function startReplyWorker() {
   console.log("");
-  console.log(
-    "=============================================="
-  );
-  console.log(
-    "🚀 REPLY WORKER STARTED"
-  );
-  console.log(
-    "=============================================="
-  );
-
-  console.log(
-    "🕐 Started:",
-    new Date().toISOString()
-  );
-
-  console.log(
-    "💾 Database:",
-    "Used for SMTPConfig + EmailHealth"
-  );
-
-  console.log(
-    "🧠 Processed message tracking:",
-    "IN-MEMORY"
-  );
-
-  console.log(
-    "=============================================="
-  );
+  console.log("==============================================");
+  console.log("🚀 REPLY WORKER STARTED");
+  console.log("==============================================");
 
   while (true) {
     try {
-      console.log("");
-      console.log(
-        "=============================================="
-      );
-      console.log(
-        "🔄 NEW REPLY WORKER CYCLE"
-      );
-      console.log(
-        "=============================================="
-      );
-
-      console.log(
-        "🕐 Cycle started:",
-        new Date().toISOString()
-      );
-
-      cleanupProcessedMessages();
-
       // ========================================================
-      // GET ACTIVE SYSTEM ACCOUNTS
+      // GET ACTIVE SMTP CONFIG ACCOUNTS
       // ========================================================
 
-      console.log("");
-      console.log(
-        "🔍 Fetching active SystemConfig accounts..."
-      );
-
-      const systems =
-        await prisma.systemConfig.findMany({
+      const smtpConfigs =
+        await prisma.sMTPConfig.findMany({
           where: {
             isActive: true,
           },
+
           orderBy: {
             createdAt: "desc",
           },
         });
 
+      console.log("");
       console.log(
-        `📊 Active system accounts: ${systems.length}`
+        `📊 Active SMTP accounts: ${smtpConfigs.length}`
       );
 
-      if (!systems.length) {
+      if (!smtpConfigs.length) {
         console.log(
-          "⚠️ No active SystemConfig accounts found"
+          "⚠️ No active SMTPConfig accounts"
         );
+
+        await sleep(5 * 60 * 1000);
+        continue;
       }
 
       // ========================================================
-      // PROCESS SYSTEM ACCOUNTS
+      // CHECK EACH SMTP CONFIG ACCOUNT
       // ========================================================
 
-      for (const system of systems) {
+      for (const smtpConfig of smtpConfigs) {
         try {
+          const inboxEmail = normalizeEmail(
+            smtpConfig.senderEmail ||
+              smtpConfig.username
+          );
+
           console.log("");
+          console.log("==============================================");
+          console.log("📮 CHECKING SMTP ACCOUNT");
+          console.log("==============================================");
           console.log(
-            "=============================================="
-          );
-          console.log(
-            "📮 SYSTEM ACCOUNT"
-          );
-          console.log(
-            "=============================================="
-          );
-
-          console.log(
-            "🆔 ID:",
-            system.id
-          );
-
-          console.log(
-            "👤 User ID:",
-            system.userId
-          );
-
-          console.log(
-            "📧 Username:",
-            system.username
-          );
-
-          console.log(
-            "📧 Sender Email:",
-            system.senderEmail
-          );
-
-          console.log(
-            "🔘 Active:",
-            system.isActive
+            "📧 Account:",
+            inboxEmail
           );
 
           // ======================================================
-          // READ INBOX
+          // READ ONLY THIS SMTP ACCOUNT'S UNREAD INBOX
           // ======================================================
-
-          console.log("");
-          console.log(
-            `📥 Checking inbox for: ${system.username}`
-          );
 
           const emails = await readInbox({
-            host: "imap.gmail.com",
-            port: 993,
-            username: system.username,
-            password: system.password,
+            host:
+              smtpConfig.host ||
+              "imap.gmail.com",
+
+            port:
+              smtpConfig.imapPort ||
+              993,
+
+            username:
+              smtpConfig.username,
+
+            password:
+              smtpConfig.password,
           });
 
-          console.log("");
           console.log(
-            `📨 Inbox returned ${emails.length} email(s)`
+            `📨 Unread emails found: ${emails.length}`
           );
 
           if (!emails.length) {
@@ -515,38 +311,32 @@ async function startReplyWorker() {
           }
 
           // ======================================================
-          // PROCESS EMAILS
+          // PROCESS UNREAD EMAILS
           // ======================================================
 
           for (const email of emails) {
             try {
-              console.log("");
-              console.log(
-                "=============================================="
-              );
-              console.log(
-                "📩 INCOMING EMAIL"
-              );
-              console.log(
-                "=============================================="
+              const sender = normalizeEmail(
+                email.from?.value?.[0]?.address ||
+                  email.from?.address ||
+                  email.from
               );
 
               const messageId =
                 getMessageId(email);
 
-              const sender =
-                normalizeEmail(
-                  email.from?.value?.[0]?.address
-                );
+              const subject = String(
+                email.subject || ""
+              ).trim();
 
-              const subject =
-                String(
-                  email.subject || ""
-                ).trim();
+              console.log("");
+              console.log("----------------------------------------------");
+              console.log("📩 INCOMING UNREAD EMAIL");
+              console.log("----------------------------------------------");
 
               console.log(
-                "🆔 Message ID:",
-                messageId || "N/A"
+                "📥 Receiving account:",
+                inboxEmail
               );
 
               console.log(
@@ -555,120 +345,85 @@ async function startReplyWorker() {
               );
 
               console.log(
-                "📥 Receiving system:",
-                system.username
-              );
-
-              console.log(
                 "📋 Subject:",
                 subject
               );
 
               console.log(
-                "📅 Date:",
-                email.date
+                "🆔 Message ID:",
+                messageId || "N/A"
               );
 
               // ==================================================
-              // BASIC VALIDATION
+              // IMPORTANT:
+              // VERIFY EMAIL BELONGS TO CURRENT SMTP ACCOUNT
               // ==================================================
 
-              if (!sender) {
+              const recipients = [
+                ...(email.to?.value || []),
+                ...(email.cc?.value || []),
+              ]
+                .map((item: any) =>
+                  normalizeEmail(item.address)
+                )
+                .filter(Boolean);
+
+              const belongsToThisAccount =
+                recipients.length === 0 ||
+                recipients.includes(inboxEmail);
+
+              if (!belongsToThisAccount) {
                 console.log(
-                  "❌ Sender missing"
+                  "⏭️ Email does not belong to this SMTP account"
                 );
 
                 continue;
               }
 
               // ==================================================
-              // DUPLICATE CHECK
+              // CHECK IF THIS EMAIL SHOULD GET A REPLY
               // ==================================================
 
-              if (
-                messageId &&
-                processedMessages.has(messageId)
-              ) {
-                console.log("");
+              if (!shouldReplyToEmail(email)) {
                 console.log(
-                  "⏭️ DUPLICATE EMAIL"
-                );
-
-                console.log(
-                  "🆔 Already processed:",
-                  messageId
+                  "⏭️ Not eligible for reply"
                 );
 
                 continue;
               }
-
-              // ==================================================
-              // AUTO REPLY RULE
-              // ==================================================
 
               console.log("");
               console.log(
-                "🔎 Checking auto-reply eligibility..."
-              );
-
-              const allowed =
-                shouldAutoReply(email);
-
-              if (!allowed) {
-                console.log(
-                  "⏭️ Auto-reply not allowed for this email"
-                );
-
-                continue;
-              }
-
-              console.log(
-                "✅ Email is eligible for auto-reply"
-              );
-
-              // ==================================================
-              // DELAY
-              // ==================================================
-
-              const delay =
-                getRandomReplyDelay();
-
-              console.log("");
-              console.log(
-                "⏳ REPLY SCHEDULED"
+                "🎯 THIS EMAIL WILL BE REPLIED TO"
               );
 
               console.log(
-                "📧 To:",
+                "📧 Reply recipient:",
                 sender
               );
 
               console.log(
-                "⏱️ Delay:",
-                `${delay.minutes} minute(s)`
-              );
-
-              await sleep(
-                delay.milliseconds
-              );
-
-              console.log(
-                "✅ Delay completed"
+                "📥 SMTP account:",
+                inboxEmail
               );
 
               // ==================================================
-              // GENERATE REPLY
+              // GENERATE AI REPLY
               // ==================================================
 
               const reply =
                 await generateReply(email);
 
-              console.log(
-                `✅ Reply generated ${reply} character(s)`
-              );
+              if (!reply) {
+                console.log(
+                  "⚠️ AI returned empty reply"
+                );
+
+                continue;
+              }
 
               // ==================================================
-              // SUBJECT
+              // REPLY SUBJECT
               // ==================================================
 
               const replySubject =
@@ -676,10 +431,7 @@ async function startReplyWorker() {
                   .toLowerCase()
                   .startsWith("re:")
                   ? subject
-                  : `Re: ${
-                      subject ||
-                      "Checking In"
-                    }`;
+                  : `Re: ${subject}`;
 
               // ==================================================
               // SEND REPLY
@@ -687,412 +439,86 @@ async function startReplyWorker() {
 
               console.log("");
               console.log(
-                "=============================================="
-              );
-              console.log(
                 "📤 SENDING REPLY"
-              );
-              console.log(
-                "=============================================="
-              );
-
-              console.log(
-                "FROM:",
-                system.username
-              );
-
-              console.log(
-                "TO:",
-                sender
-              );
-
-              console.log(
-                "SUBJECT:",
-                replySubject
               );
 
               await sendSMTPEmail({
-                host: "smtp.gmail.com",
-                port: 465,
-                from: system.username,
+                host:
+                  smtpConfig.host ||
+                  "smtp.gmail.com",
+
+                port:
+                  smtpConfig.port ||
+                  465,
+
+                username:
+                  smtpConfig.username,
+
+                password:
+                  smtpConfig.password,
+
+                from:
+                  smtpConfig.senderEmail ||
+                  smtpConfig.username,
+
+                fromName:
+                  smtpConfig.senderName ||
+                  undefined,
+
                 to: sender,
+
                 subject: replySubject,
+
                 html: reply,
-                username: system.username,
-                password: system.password,
               });
 
-              console.log("");
               console.log(
-                "✅ REPLY SENT SUCCESSFULLY"
-              );
-
-              console.log(
-                `📤 ${system.username} → ${sender}`
+                "✅ REPLY SENT"
               );
 
               // ==================================================
-              // MARK PROCESSED
+              // MARK ONLY AFTER SUCCESSFUL REPLY
               // ==================================================
 
-              markMessageProcessed(email);
-
-              // ==================================================
-              // FIND SMTP CONFIG
-              // ==================================================
-
-              console.log("");
-              console.log(
-                "=============================================="
-              );
-              console.log(
-                "🔎 FINDING MATCHING SMTP CONFIG"
-              );
-              console.log(
-                "=============================================="
-              );
-
-              const normalizedSender =
-                normalizeEmail(sender);
+              markProcessed(email);
 
               console.log(
-                "📧 Looking for:",
-                normalizedSender
+                "💾 Message marked as processed"
               );
 
-              const smtpConfigs =
-                await prisma.sMTPConfig.findMany({
-                  where: {
-                    senderEmail:
-                      normalizedSender,
-                  },
-
-                  select: {
-                    id: true,
-                    userId: true,
-                    username: true,
-                    senderEmail: true,
-                    senderName: true,
-                    isActive: true,
-                    warmup: true,
-                  },
-                });
-
-              console.log(
-                `📊 Matching SMTPConfig records: ${smtpConfigs.length}`
-              );
-
-              if (!smtpConfigs.length) {
-                console.log(
-                  "⚠️ No matching SMTPConfig found"
-                );
-
-                console.log(
-                  "⚠️ Reply was sent successfully"
-                );
-
-                continue;
-              }
-
-              // ==================================================
-              // UPDATE EMAIL HEALTH
-              // ==================================================
-
-              for (const smtpConfig of smtpConfigs) {
-                try {
-                  console.log("");
-                  console.log(
-                    "=============================================="
-                  );
-                  console.log(
-                    "📈 UPDATING EMAIL HEALTH"
-                  );
-                  console.log(
-                    "=============================================="
-                  );
-
-                  console.log(
-                    "🆔 SMTPConfig:",
-                    smtpConfig.id
-                  );
-
-                  console.log(
-                    "📧 Email:",
-                    smtpConfig.senderEmail
-                  );
-
-                  console.log(
-                    "👤 User ID:",
-                    smtpConfig.userId
-                  );
-
-                  console.log(
-                    "🔘 Active:",
-                    smtpConfig.isActive
-                  );
-
-                  // ==================================================
-                  // EXISTING HEALTH
-                  // ==================================================
-
-                  const existingHealth =
-                    await prisma.emailHealth.findUnique({
-                      where: {
-                        smtpConfigId:
-                          smtpConfig.id,
-                      },
-                    });
-
-                  if (existingHealth) {
-                    console.log(
-                      "✅ Existing EmailHealth found"
-                    );
-
-                    console.log(
-                      "📤 Total sent:",
-                      existingHealth.totalSent
-                    );
-
-                    console.log(
-                      "📩 Total replies:",
-                      existingHealth.totalReplies
-                    );
-
-                    console.log(
-                      "📤 Today sent:",
-                      existingHealth.todaySent
-                    );
-
-                    console.log(
-                      "📩 Today replies:",
-                      existingHealth.todayReplies
-                    );
-                  } else {
-                    console.log(
-                      "⚠️ EmailHealth not found"
-                    );
-
-                    console.log(
-                      "🆕 Creating new EmailHealth"
-                    );
-                  }
-
-                  // ==================================================
-                  // UPSERT HEALTH
-                  // ==================================================
-
-                  const updatedHealth =
-                    await prisma.emailHealth.upsert({
-                      where: {
-                        smtpConfigId:
-                          smtpConfig.id,
-                      },
-
-                      update: {
-                        totalReplies: {
-                          increment: 1,
-                        },
-
-                        todayReplies: {
-                          increment: 1,
-                        },
-
-                        updatedAt:
-                          new Date(),
-                      },
-
-                      create: {
-                        smtpConfigId:
-                          smtpConfig.id,
-
-                        warmupDay: 1,
-
-                        dailyLimit: 3,
-
-                        totalSent: 0,
-
-                        totalReplies: 1,
-
-                        todaySent: 0,
-
-                        todayReplies: 1,
-
-                        health: 0,
-
-                        startedAt:
-                          new Date(),
-
-                        lastWarmupDate:
-                          new Date(),
-
-                        completed: false,
-                      },
-                    });
-
-                  console.log("");
-                  console.log(
-                    "✅ EMAIL HEALTH UPDATED"
-                  );
-
-                  console.log(
-                    "📤 Total sent:",
-                    updatedHealth.totalSent
-                  );
-
-                  console.log(
-                    "📩 Total replies:",
-                    updatedHealth.totalReplies
-                  );
-
-                  console.log(
-                    "📤 Today sent:",
-                    updatedHealth.todaySent
-                  );
-
-                  console.log(
-                    "📩 Today replies:",
-                    updatedHealth.todayReplies
-                  );
-
-                  // ==================================================
-                  // REPLY RATE
-                  // ==================================================
-
-                  const replyRate =
-                    updatedHealth.totalSent > 0
-                      ? (
-                          (updatedHealth.totalReplies /
-                            updatedHealth.totalSent) *
-                          100
-                        )
-                      : 0;
-
-                  console.log(
-                    `📊 Reply rate: ${replyRate.toFixed(2)}%`
-                  );
-                } catch (healthError) {
-                  console.error("");
-                  console.error(
-                    "❌ EMAIL HEALTH UPDATE FAILED"
-                  );
-
-                  console.error(
-                    healthError
-                  );
-                }
-              }
-
-              // ==================================================
-              // FINAL
-              // ==================================================
-
-              console.log("");
-              console.log(
-                "=============================================="
-              );
-              console.log(
-                "🎉 EMAIL PROCESS COMPLETED"
-              );
-              console.log(
-                "=============================================="
-              );
-
-              console.log(
-                "📧 Incoming:",
-                sender
-              );
-
-              console.log(
-                "📤 Replied from:",
-                system.username
-              );
-
-              console.log(
-                "🆔 Message:",
-                messageId || "N/A"
-              );
-
-              console.log(
-                "💾 Duplicate tracking:",
-                messageId
-                  ? "ACTIVE"
-                  : "UNAVAILABLE"
-              );
-
-              console.log(
-                "=============================================="
-              );
             } catch (emailError) {
-              console.error("");
               console.error(
-                "=============================================="
-              );
-              console.error(
-                "❌ EMAIL PROCESSING ERROR"
-              );
-              console.error(
-                "=============================================="
-              );
-
-              console.error(
+                "❌ Email processing failed:",
                 emailError
               );
             }
           }
-        } catch (systemError) {
-          console.error("");
-          console.error(
-            "=============================================="
-          );
-          console.error(
-            `❌ SYSTEM ACCOUNT ERROR: ${system.username}`
-          );
-          console.error(
-            "=============================================="
-          );
 
+        } catch (smtpError) {
           console.error(
-            systemError
+            `❌ SMTP account failed: ${smtpConfig.senderEmail}`,
+            smtpError
           );
         }
       }
-    } catch (workerError) {
-      console.error("");
-      console.error(
-        "=============================================="
-      );
-      console.error(
-        "❌ REPLY WORKER ERROR"
-      );
-      console.error(
-        "=============================================="
-      );
 
+    } catch (workerError) {
       console.error(
+        "❌ Reply worker error:",
         workerError
       );
     }
 
-    // ==========================================================
+    // ========================================================
     // NEXT CHECK
-    // ==========================================================
+    // ========================================================
 
     const nextCheck =
-      Math.floor(
-        Math.random() * 6
-      ) + 5;
+      Math.floor(Math.random() * 6) + 5;
 
     console.log("");
     console.log(
-      "=============================================="
-    );
-
-    console.log(
-      `⏰ Next inbox check after ${nextCheck} minute(s)`
-    );
-
-    console.log(
-      "=============================================="
+      `⏰ Next inbox check in ${nextCheck} minute(s)`
     );
 
     await sleep(
@@ -1106,12 +532,10 @@ async function startReplyWorker() {
 // ============================================================
 
 startReplyWorker().catch((error) => {
-  console.error("");
   console.error(
-    "💥 REPLY WORKER CRASHED"
+    "💥 REPLY WORKER CRASHED",
+    error
   );
-
-  console.error(error);
 
   process.exit(1);
 });
