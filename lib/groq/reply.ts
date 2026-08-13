@@ -23,7 +23,9 @@ export async function generateAIReply(email: any): Promise<string> {
   console.log("🤖 Generating reply using Groq...");
 
   const subject = String(email.subject || "").trim();
-  const body = cleanEmailBody(email);
+  const body = String(email.body || "").trim();
+  console.log("📧 Email subject:", subject);
+  console.log("📧 Email body:", body);
 
   if (!body) {
     return `Hi,
@@ -57,6 +59,7 @@ Rules:
 - Do not use markdown.
 - Do not add a subject line.
 - Return only the email reply.
+- in place of variable {variable_name} use name randmon of usa people.
           `,
         },
         {
