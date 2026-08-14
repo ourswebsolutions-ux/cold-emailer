@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/services/database/prisma";
-
+import {
+ 
+  getCurrentUserId,
+ 
+} from "@/lib/follow-up-api";
 // GET
 // ?userId=xxx          -> Get all templates
 // ?id=xxx              -> Get single template
@@ -9,7 +13,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
 
     const id = searchParams.get("id");
-    const userId = searchParams.get("userId");
+    const userId = await getCurrentUserId()
 
     if (id) {
       const template = await prisma.emailTemplate.findUnique({

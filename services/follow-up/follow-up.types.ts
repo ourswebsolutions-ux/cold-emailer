@@ -10,14 +10,25 @@ import type {
   SMTPConfig,
 } from "@prisma/client";
 
+export type IntervalUnit =
+  | "seconds"
+  | "minutes"
+  | "hours"
+  | "days";
 export type CreateCampaignInput = {
   name: string;
   smtpConfigId?: string | null;
+  campaignType: "EMAIL" | "FOLLOW_UP";
   stopOnReply?: boolean;
   timezone?: string;
   sendingStart?: string;
   sendingEnd?: string;
   scheduledAt?: string | Date | null;
+   intervalValue?: number;
+  intervalUnit?: IntervalUnit;
+  dailyLimit?: number;
+   greetingEnabled?: boolean;
+  spinTextEnabled?: boolean;
   recipientEmailIds: string[];
   steps: Array<{
     stepNumber: number;
