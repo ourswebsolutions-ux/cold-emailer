@@ -220,6 +220,19 @@ export default function Navbar() {
                         <div className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">start Follow-up Campaigns</div>
                       </div>
                     </Link>
+                    <Link
+                      href="/campaigns"
+                      onClick={() => setIsDropdownOpen(false)}
+                      className={`group/item flex items-start gap-4 px-4 py-3 mx-1.5 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-800 transition-all ${pathname === "/email-templetes" ? "bg-blue-50 dark:bg-blue-950/50" : ""}`}
+                    >
+                      <div className="mt-0.5 text-blue-600 flex-shrink-0">
+                        <FileText className="w-5 h-5 transition-transform group-hover/item:scale-110 duration-200" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-foreground">Email Campaign</div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400 line-clamp-2">start Email Campaigns</div>
+                      </div>
+                    </Link>
                   </div>
                 </div>
               </div>
