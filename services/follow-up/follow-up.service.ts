@@ -230,7 +230,13 @@ export async function createCampaign(
   const {
     name,
     smtpConfigId,
+    campaignType,
     stopOnReply = true,
+    intervalValue = 1,
+    intervalUnit = "minutes",
+    dailyLimit = 50,
+    greetingEnabled = true,
+    spinTextEnabled = true,
     timezone = "Asia/Karachi",
     sendingStart = "09:00",
     sendingEnd = "18:00",
@@ -299,12 +305,19 @@ export async function createCampaign(
         userId,
         smtpConfigId: smtpConfigId || null,
         name: name.trim(),
+        campaignType,
         status: campaignStatus,
         stopOnReply,
+        intervalValue,
+    intervalUnit,
+    dailyLimit,
+    greetingEnabled,
+    spinTextEnabled,
         timezone,
         sendingStart,
         sendingEnd,
         scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+        
         steps: {
           create: normalizedSteps.map((s) => ({
             stepNumber: s.stepNumber,
@@ -327,9 +340,10 @@ export async function createCampaign(
 
     // Create recipients + recipient-steps
     for (const email of emails) {
-      const firstScheduledAt = firstStep
-        ? computeFirstScheduledAt(scheduleBase, firstStep.delayDays)
-        : null;
+      const firstScheduledAt =
+        campaignType === "EMAIL"
+          ? scheduleBase
+          : computeFirstScheduledAt(scheduleBase, firstStep.delayDays);
 
       await tx.followUpRecipient.create({
         data: {
@@ -828,9 +842,12 @@ export async function addRecipients(
   const created = await prisma.$transaction(async (tx) => {
     const results = [];
     for (const email of toAdd) {
-      const firstScheduledAt = firstStep
-        ? computeFirstScheduledAt(base, firstStep.delayDays)
-        : null;
+      const firstScheduledAt =
+        campaign.campaignType === "EMAIL"
+          ? base
+          : firstStep
+            ? computeFirstScheduledAt(base, firstStep.delayDays)
+            : null;
 
       const recipient = await tx.followUpRecipient.create({
         data: {

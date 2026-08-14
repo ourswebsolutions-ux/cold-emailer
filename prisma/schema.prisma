@@ -362,13 +362,14 @@ model FollowUpCampaign {
   id           String                  @id @default(cuid())
   userId       String
   smtpConfigId String?
-
+  campaignType String?
   name         String
 
   status       FollowUpCampaignStatus  @default(DRAFT)
 
   stopOnReply  Boolean                 @default(true)
-
+  greetingEnabled Boolean?            @default(true)
+  spinTextEnabled Boolean?             @default(true)
   scheduledAt  DateTime?
 
   timezone     String                  @default("Asia/Karachi")
@@ -382,14 +383,27 @@ model FollowUpCampaign {
   user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   smtpConfig   SMTPConfig?             @relation(fields: [smtpConfigId], references: [id], onDelete: SetNull)
 
+intervalValue Int? @default(1)
+intervalUnit  String? @default("minutes")
+
+dailyLimit Int? @default(50)
+
   steps        FollowUpStep[]
   recipients   FollowUpRecipient[]
+
 
   @@index([userId])
   @@index([status])
   @@index([scheduledAt])
 }
 
+
+enum FollowUpIntervalUnit {
+  seconds
+  minutes
+  hours
+  days
+}
 // ==================================================
 // FOLLOW-UP STEP
 // ==================================================
