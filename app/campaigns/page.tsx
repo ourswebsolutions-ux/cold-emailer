@@ -216,7 +216,7 @@ export default function CampaignPage() {
                 setSmtpAccounts(
                     list.map((a: any) => ({
                         id: a.id,
-                        name: a.name || a.fromName || a.label,
+                        name: a.senderName || a.senderName || a.senderName,
                         email: a.email || a.from || a.username || a.user,
                         host: a.host || a.smtpHost,
                         port: a.port || a.smtpPort || 587,
@@ -922,26 +922,24 @@ export default function CampaignPage() {
                                                     <div className="flex items-start justify-between gap-2">
                                                         <div className="min-w-0">
                                                             <div className="truncate font-medium text-zinc-900">
-                                                                {acc.name || acc.fromName || acc.email}
+                                                                {acc?.name || "ali"}
                                                             </div>
                                                             <div className="mt-0.5 truncate text-sm text-zinc-500">
                                                                 {acc.email}
                                                             </div>
-                                                            <div className="mt-1 text-xs text-zinc-400">
-                                                                {acc.host}:{acc.port}
-                                                            </div>
+                                                            
                                                         </div>
                                                         {selected && (
                                                             <CheckCircle2 className="h-5 w-5 shrink-0 text-blue-600" />
                                                         )}
                                                     </div>
-                                                    <div className="mt-2 flex items-center gap-1.5 text-xs">
+                                                    {/* <div className="mt-2 flex items-center gap-1.5 text-xs">
                                                         <span
                                                             className={`inline-block h-1.5 w-1.5 rounded-full ${acc.isActive !== false ? "bg-emerald-500" : "bg-zinc-300"
                                                                 }`}
                                                         />
                                                         {acc.isActive !== false ? "Connected" : "Inactive"}
-                                                    </div>
+                                                    </div> */}
                                                 </button>
                                             );
                                         })}
