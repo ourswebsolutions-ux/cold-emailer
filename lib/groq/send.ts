@@ -12,6 +12,7 @@ const groqKeys = [
   process.env.GROQ_API_KEY2,
   process.env.GROQ_API_KEY3,
   process.env.GROQ_API_KEY4,
+  process.env.GROQ_API_KEY5,
 ].filter(Boolean) as string[];
 
 /**

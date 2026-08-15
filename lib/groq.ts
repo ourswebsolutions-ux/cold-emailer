@@ -4,6 +4,9 @@ const groqApiKeys = [
   process.env.GROQ_API_KEY,
   process.env.GROQ_API_KEY1,
   process.env.GROQ_API_KEYY2,
+    process.env.GROQ_API_KEY3,
+    process.env.GROQ_API_KEY4,
+    process.env.GROQ_API_KEY5
 ].filter((key): key is string => Boolean(key))
 
 if (groqApiKeys.length === 0) {
