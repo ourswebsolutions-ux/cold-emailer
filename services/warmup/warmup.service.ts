@@ -1,5 +1,12 @@
 import { prisma } from "@/services/database/prisma";
 import { sendSMTPEmail } from "@/services/smtp/smtp.service";
+import { personalizeWarmupTemplate } from "@/lib/groq/send";
+
+/**
+ * =========================================================
+ * DEFAULT WARMUP TEMPLATES
+ * =========================================================
+ */
 
 const defaultTemplates = [
   {
@@ -58,7 +65,7 @@ const MAX_DAILY_LIMIT = 100;
  * Day 2 = 6
  * Day 3 = 9
  * ...
- * Max = 100
+ * Maximum = 100
  */
 function calculateDailyLimit(day: number) {
   return Math.min(
@@ -68,21 +75,21 @@ function calculateDailyLimit(day: number) {
 }
 
 /**
- * Calculate random delay for next email.
+ * =========================================================
+ * RANDOM NEXT SEND DELAY
+ * =========================================================
  *
  * Emails are distributed across 24 hours.
- * Random variation = ±35%
+ * Random variation = ±35%.
  */
-function calculateNextDelay(
-  dailyLimit: number
-) {
+function calculateNextDelay(dailyLimit: number) {
   const averageMinutes =
     (24 * 60) / dailyLimit;
 
   const variation =
     averageMinutes * 0.35;
 
-  const minutes = Math.max(
+  return Math.max(
     5,
     Math.round(
       averageMinutes +
@@ -90,8 +97,6 @@ function calculateNextDelay(
           variation)
     )
   );
-
-  return minutes;
 }
 
 /**
@@ -108,9 +113,7 @@ function formatDate(date: Date | null) {
   return date.toLocaleString();
 }
 
-function getRemainingMinutes(
-  date: Date
-) {
+function getRemainingMinutes(date: Date) {
   const difference =
     date.getTime() - Date.now();
 
@@ -146,7 +149,7 @@ async function updateWarmupDay(
 
   if (!health) {
     console.log(
-      `⚠️ [${senderEmail}] Health record not found while updating day`
+      `⚠️ [${senderEmail}] Health record not found`
     );
 
     return null;
@@ -168,15 +171,15 @@ async function updateWarmupDay(
   );
 
   console.log(
-    `📅 [${senderEmail}] Current warmup day: ${health.warmupDay}/${MAX_WARMUP_DAY}`
+    `   Current Day : ${health.warmupDay}/${MAX_WARMUP_DAY}`
   );
 
   console.log(
-    `📅 [${senderEmail}] Last warmup date: ${formatDate(lastDate)}`
+    `   Last Date   : ${formatDate(lastDate)}`
   );
 
   console.log(
-    `📅 [${senderEmail}] Days since last warmup: ${diffDays}`
+    `   Days Passed : ${diffDays}`
   );
 
   /**
@@ -184,7 +187,7 @@ async function updateWarmupDay(
    */
   if (diffDays < 1) {
     console.log(
-      `📅 [${senderEmail}] Same warmup day. No day update needed.`
+      `   Status      : SAME DAY`
     );
 
     return health;
@@ -212,8 +215,9 @@ async function updateWarmupDay(
         delay * 60 * 1000
     );
 
+  console.log("");
   console.log(
-    `📈 [${senderEmail}] NEW WARMUP DAY`
+    `📈 [${senderEmail}] WARMUP DAY ADVANCED`
   );
 
   console.log(
@@ -262,7 +266,7 @@ async function updateWarmupDay(
     });
 
   console.log(
-    `✅ [${senderEmail}] Warmup day updated successfully`
+    `✅ [${senderEmail}] Warmup day updated`
   );
 
   return updated;
@@ -276,22 +280,24 @@ async function updateWarmupDay(
 
 async function processAccount(
   account: any,
-  systemEmails: any[]
+  systemEmails: any[],
+  accountIndex: number,
+  totalAccounts: number
 ) {
   const senderEmail =
     account.senderEmail;
 
   console.log("");
   console.log(
-    "------------------------------------------------------------"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   );
 
   console.log(
-    `🚀 ACCOUNT PROCESS START: ${senderEmail}`
+    `🚀 ACCOUNT ${accountIndex}/${totalAccounts} | ${senderEmail}`
   );
 
   console.log(
-    "------------------------------------------------------------"
+    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   );
 
   try {
@@ -301,8 +307,9 @@ async function processAccount(
      * =======================================================
      */
 
+    console.log("");
     console.log(
-      `🔍 [${senderEmail}] STEP 1: Loading email health...`
+      `🔍 [${senderEmail}] Loading email health...`
     );
 
     let health =
@@ -320,7 +327,11 @@ async function processAccount(
 
     if (!health) {
       console.log(
-        `🆕 [${senderEmail}] No health record found. Creating...`
+        `🆕 [${senderEmail}] Health record not found`
+      );
+
+      console.log(
+        `   Creating new health record...`
       );
 
       const dailyLimit = 3;
@@ -347,14 +358,14 @@ async function processAccount(
 
             completed: false,
 
-            startedAt: new Date(),
+            startedAt:
+              new Date(),
 
             lastWarmupDate:
               new Date(),
 
             /**
-             * IMPORTANT:
-             * First email is ready immediately.
+             * First email ready immediately.
              */
             nextWarmupAt:
               new Date(),
@@ -366,15 +377,15 @@ async function processAccount(
       );
 
       console.log(
-        `📅 [${senderEmail}] Warmup Day: 1`
+        `   Warmup Day  : 1`
       );
 
       console.log(
-        `📧 [${senderEmail}] Daily Limit: 3`
+        `   Daily Limit : 3`
       );
 
       console.log(
-        `🚀 [${senderEmail}] First email is READY NOW`
+        `   First Send  : READY NOW`
       );
     }
 
@@ -384,8 +395,9 @@ async function processAccount(
      * =======================================================
      */
 
+    console.log("");
     console.log(
-      `📅 [${senderEmail}] STEP 2: Checking warmup day...`
+      `📅 [${senderEmail}] Checking warmup day...`
     );
 
     const updatedHealth =
@@ -400,7 +412,7 @@ async function processAccount(
 
     /**
      * =======================================================
-     * STEP 4 — PRINT CURRENT STATUS
+     * STEP 4 — CURRENT STATUS
      * =======================================================
      */
 
@@ -439,10 +451,6 @@ async function processAccount(
       `   Next Warmup   : ${formatDate(health.nextWarmupAt)}`
     );
 
-    console.log(
-      `   Current Time  : ${formatDate(now)}`
-    );
-
     /**
      * =======================================================
      * STEP 5 — CHECK COMPLETED
@@ -456,7 +464,7 @@ async function processAccount(
       );
 
       console.log(
-        `⏭️ [${senderEmail}] Skipping account`
+        `⏭️ [${senderEmail}] Account skipped`
       );
 
       return;
@@ -478,7 +486,11 @@ async function processAccount(
       );
 
       console.log(
-        `   ${health.todaySent}/${health.dailyLimit} emails sent today`
+        `   Progress : ${health.todaySent}/${health.dailyLimit}`
+      );
+
+      console.log(
+        `   Action   : SKIPPED`
       );
 
       return;
@@ -486,7 +498,7 @@ async function processAccount(
 
     /**
      * =======================================================
-     * STEP 7 — CHECK INDIVIDUAL TIMER
+     * STEP 7 — CHECK TIMER
      * =======================================================
      */
 
@@ -518,7 +530,7 @@ async function processAccount(
 
     /**
      * =======================================================
-     * STEP 8 — ACCOUNT IS READY
+     * STEP 8 — READY
      * =======================================================
      */
 
@@ -533,8 +545,9 @@ async function processAccount(
      * =======================================================
      */
 
+    console.log("");
     console.log(
-      `🔍 [${senderEmail}] Finding available receivers...`
+      `🔍 [${senderEmail}] Finding receivers...`
     );
 
     const receivers =
@@ -557,7 +570,7 @@ async function processAccount(
     }
 
     /**
-     * Select random receiver
+     * Random receiver
      */
     const receiver =
       receivers[
@@ -567,16 +580,30 @@ async function processAccount(
         )
       ];
 
+    console.log("");
     console.log(
-      `📨 [${senderEmail}] Selected receiver: ${receiver.username}`
+      `📨 [${senderEmail}] RECEIVER SELECTED`
+    );
+
+    console.log(
+      `   Email   : ${receiver.username}`
+    );
+
+    console.log(
+      `   Name    : ${receiver.name || "N/A"}`
+    );
+
+    console.log(
+      `   Company : ${receiver.company || "N/A"}`
     );
 
     /**
      * =======================================================
-     * STEP 10 — LOAD EMAIL TEMPLATES
+     * STEP 10 — LOAD TEMPLATES
      * =======================================================
      */
 
+    console.log("");
     console.log(
       `📝 [${senderEmail}] Loading email templates...`
     );
@@ -595,7 +622,7 @@ async function processAccount(
       });
 
     console.log(
-      `📝 [${senderEmail}] User templates found: ${templates.length}`
+      `   User Templates : ${templates.length}`
     );
 
     const template =
@@ -614,12 +641,80 @@ async function processAccount(
           ];
 
     console.log(
-      `📝 [${senderEmail}] Selected subject: "${template.subject}"`
+      `   Selected       : "${template.subject}"`
     );
 
     /**
      * =======================================================
-     * STEP 11 — SEND SMTP EMAIL
+     * STEP 11 — AI PERSONALIZATION
+     * =======================================================
+     */
+
+    console.log("");
+    console.log(
+      `🤖 [${senderEmail}] AI PERSONALIZATION START`
+    );
+
+    console.log(
+      `   Original Subject : "${template.subject}"`
+    );
+
+    const aiStartedAt =
+      Date.now();
+
+    const personalizedTemplate =
+      await personalizeWarmupTemplate({
+        subject:
+          template.subject,
+
+        body:
+          template.body || "",
+
+        receiver: {
+          email:
+            receiver.username,
+
+          username:
+            receiver.username,
+
+          name:
+            receiver.name,
+
+          firstName:
+            receiver.firstName,
+
+          lastName:
+            receiver.lastName,
+
+          company:
+            receiver.company,
+        },
+      });
+
+    const aiDuration =
+      Date.now() -
+      aiStartedAt;
+
+    console.log("");
+    console.log(
+      `✅ [${senderEmail}] AI PERSONALIZATION COMPLETED`
+    );
+
+    console.log(
+      `   Final Subject : "${personalizedTemplate.subject}"`
+    );
+
+    console.log(
+      `   Duration      : ${aiDuration}ms`
+    );
+
+    console.log(
+      `   Status        : SUCCESS`
+    );
+
+    /**
+     * =======================================================
+     * STEP 12 — SMTP SEND
      * =======================================================
      */
 
@@ -629,23 +724,23 @@ async function processAccount(
     );
 
     console.log(
-      `   FROM     : ${account.senderEmail}`
+      `   From    : ${account.senderEmail}`
     );
 
     console.log(
-      `   TO       : ${receiver.username}`
+      `   To      : ${receiver.username}`
     );
 
     console.log(
-      `   HOST     : ${account.host}`
+      `   Host    : ${account.host}`
     );
 
     console.log(
-      `   PORT     : ${account.port}`
+      `   Port    : ${account.port}`
     );
 
     console.log(
-      `   SUBJECT  : ${template.subject}`
+      `   Subject : "${personalizedTemplate.subject}"`
     );
 
     const sendStartedAt =
@@ -673,10 +768,11 @@ async function processAccount(
         receiver.username,
 
       subject:
-        template.subject,
+        personalizedTemplate.subject,
 
       html:
-        template.body || "",
+        personalizedTemplate.body ||
+        "",
     });
 
     const sendDuration =
@@ -689,12 +785,12 @@ async function processAccount(
     );
 
     console.log(
-      `⏱️ [${senderEmail}] SMTP duration: ${sendDuration}ms`
+      `   Duration : ${sendDuration}ms`
     );
 
     /**
      * =======================================================
-     * STEP 12 — CALCULATE NEXT SEND
+     * STEP 13 — NEXT SEND
      * =======================================================
      */
 
@@ -713,25 +809,26 @@ async function processAccount(
 
     console.log("");
     console.log(
-      `⏳ [${senderEmail}] NEXT EMAIL CALCULATED`
+      `⏳ [${senderEmail}] NEXT SEND SCHEDULED`
     );
 
     console.log(
-      `   Delay    : ${nextDelay} minutes`
+      `   Delay     : ${nextDelay} minutes`
     );
 
     console.log(
-      `   Next Send: ${formatDate(nextWarmupAt)}`
+      `   Next Send : ${formatDate(nextWarmupAt)}`
     );
 
     /**
      * =======================================================
-     * STEP 13 — UPDATE DATABASE
+     * STEP 14 — UPDATE DATABASE
      * =======================================================
      */
 
+    console.log("");
     console.log(
-      `💾 [${senderEmail}] Updating email health...`
+      `💾 [${senderEmail}] UPDATING EMAIL HEALTH`
     );
 
     await prisma.emailHealth.update({
@@ -750,18 +847,29 @@ async function processAccount(
         },
 
         /**
-         * IMPORTANT:
-         *
          * Don't update lastWarmupDate here.
          * It is used for warmup-day calculation.
          */
-
         nextWarmupAt,
       },
     });
 
+    const newTodaySent =
+      health.todaySent + 1;
+
+    const newTotalSent =
+      health.totalSent + 1;
+
     console.log(
-      `✅ [${senderEmail}] Database updated`
+      `   Total Sent : ${newTotalSent}`
+    );
+
+    console.log(
+      `   Today Sent : ${newTodaySent}/${health.dailyLimit}`
+    );
+
+    console.log(
+      `   Status     : ✅ DATABASE UPDATED`
     );
 
     /**
@@ -776,33 +884,45 @@ async function processAccount(
     );
 
     console.log(
-      `   Sent To     : ${receiver.username}`
+      `   Receiver : ${receiver.username}`
     );
 
     console.log(
-      `   Today       : ${health.todaySent + 1}/${health.dailyLimit}`
+      `   Subject  : "${personalizedTemplate.subject}"`
     );
 
     console.log(
-      `   Next Email  : ${formatDate(nextWarmupAt)}`
+      `   Progress : ${newTodaySent}/${health.dailyLimit}`
     );
 
     console.log(
-      "------------------------------------------------------------"
+      `   Next Send: ${formatDate(nextWarmupAt)}`
     );
-  } catch (error) {
+
+    console.log("");
+    console.log(
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    );
+
+  } catch (error: any) {
     console.error("");
     console.error(
-      `❌ [${senderEmail}] WARMUP FAILED`
+      `❌ [${senderEmail}] ACCOUNT FAILED`
     );
 
     console.error(
-      `❌ [${senderEmail}] Error:`,
-      error
+      `   Error: ${error?.message || error}`
     );
 
+    if (error?.stack) {
+      console.error(
+        `   Stack: ${error.stack}`
+      );
+    }
+
+    console.error("");
     console.error(
-      "------------------------------------------------------------"
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     );
   }
 }
@@ -823,7 +943,11 @@ export async function runWarmupCycle() {
   );
 
   console.log(
-    `🚀 WARMUP CYCLE START: ${new Date().toLocaleString()}`
+    "🚀 WARMUP CYCLE START"
+  );
+
+  console.log(
+    `🕒 Started At: ${new Date().toLocaleString()}`
   );
 
   console.log(
@@ -836,6 +960,7 @@ export async function runWarmupCycle() {
    * =======================================================
    */
 
+  console.log("");
   console.log(
     "🔍 Loading warmup SMTP accounts..."
   );
@@ -852,25 +977,26 @@ export async function runWarmupCycle() {
   );
 
   if (!warmupAccounts.length) {
+    console.log("");
     console.log(
-      "❌ NO WARMUP ACCOUNTS FOUND"
+      "⚠️ NO WARMUP ACCOUNTS FOUND"
     );
 
     return;
   }
 
   /**
-   * Print accounts
+   * Print account list
    */
-  for (
-    let i = 0;
-    i < warmupAccounts.length;
-    i++
-  ) {
-    console.log(
-      `   ${i + 1}. ${warmupAccounts[i].senderEmail}`
-    );
-  }
+  console.log("");
+
+  warmupAccounts.forEach(
+    (account, index) => {
+      console.log(
+        `   ${index + 1}. ${account.senderEmail}`
+      );
+    }
+  );
 
   /**
    * =======================================================
@@ -891,12 +1017,13 @@ export async function runWarmupCycle() {
     });
 
   console.log(
-    `📬 Active system emails found: ${systemEmails.length}`
+    `📬 Active system emails: ${systemEmails.length}`
   );
 
   if (!systemEmails.length) {
+    console.log("");
     console.log(
-      "❌ NO ACTIVE SYSTEM EMAILS FOUND"
+      "⚠️ NO ACTIVE SYSTEM EMAILS FOUND"
     );
 
     return;
@@ -910,20 +1037,28 @@ export async function runWarmupCycle() {
 
   console.log("");
   console.log(
-    "🔥 STARTING ALL ACCOUNTS IN PARALLEL"
+    "🔥 STARTING PARALLEL ACCOUNT PROCESSING"
   );
 
   console.log(
-    `🔥 Total accounts to process: ${warmupAccounts.length}`
+    `   Accounts : ${warmupAccounts.length}`
   );
+
+  console.log(
+    `   Receivers: ${systemEmails.length}`
+  );
+
+  console.log("");
 
   const results =
     await Promise.allSettled(
       warmupAccounts.map(
-        (account) =>
+        (account, index) =>
           processAccount(
             account,
-            systemEmails
+            systemEmails,
+            index + 1,
+            warmupAccounts.length
           )
       )
     );
@@ -952,33 +1087,43 @@ export async function runWarmupCycle() {
     Date.now() -
     cycleStartedAt;
 
+  /**
+   * =======================================================
+   * FINAL SUMMARY
+   * =======================================================
+   */
+
   console.log("");
   console.log(
     "############################################################"
   );
 
   console.log(
-    `✅ WARMUP CYCLE COMPLETED`
+    "🏁 WARMUP CYCLE COMPLETED"
   );
 
   console.log(
-    `📧 Accounts processed : ${warmupAccounts.length}`
+    "############################################################"
   );
 
   console.log(
-    `✅ Promise fulfilled   : ${successful}`
+    `📧 Accounts Processed : ${warmupAccounts.length}`
   );
 
   console.log(
-    `❌ Promise rejected    : ${failed}`
+    `✅ Promise Fulfilled  : ${successful}`
   );
 
   console.log(
-    `⏱️ Cycle duration      : ${cycleDuration}ms`
+    `❌ Promise Rejected   : ${failed}`
   );
 
   console.log(
-    `🕒 Completed at        : ${new Date().toLocaleString()}`
+    `⏱️ Cycle Duration     : ${cycleDuration}ms`
+  );
+
+  console.log(
+    `🕒 Completed At       : ${new Date().toLocaleString()}`
   );
 
   console.log(
