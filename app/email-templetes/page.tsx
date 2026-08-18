@@ -2,7 +2,7 @@
 
 /**
  * Email Templates — /app/(dashboard)/email-templates/page.tsx
- * VIP Clean Version + AI Email Analysis / Improve + A/B Testing
+ * VIP Clean Version + AI Email Analysis / Improve + A/B Testing + Edit
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -23,6 +23,7 @@ import {
   FlaskConical,
   Trophy,
   GitCompareArrows,
+  Pencil,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -814,15 +815,15 @@ function ImprovementComparisonDialog({
   )
 }
 
-// ─── Create Template Dialog ─────────────────────────────────────────────────
-function CreateTemplateDialog({
+// ─── Create / Edit Template Dialog ──────────────────────────────────────────
+function TemplateFormDialog({
   isOpen,
   onOpenChange,
   draftSubject,
   setDraftSubject,
   draftBody,
   setDraftBody,
-  onCreate,
+  onSubmit,
   saving,
   quillRef,
   analyzing,
@@ -832,6 +833,7 @@ function CreateTemplateDialog({
   onImprove,
   onReanalyze,
   onClearAnalysis,
+  isEditing,
 }: {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
@@ -839,7 +841,7 @@ function CreateTemplateDialog({
   setDraftSubject: (value: string) => void
   draftBody: string
   setDraftBody: (value: string) => void
-  onCreate: () => void
+  onSubmit: () => void
   saving: boolean
   quillRef: React.RefObject<any>
   analyzing: boolean
@@ -849,6 +851,7 @@ function CreateTemplateDialog({
   onImprove: () => void
   onReanalyze: () => void
   onClearAnalysis: () => void
+  isEditing: boolean
 }) {
   const canAnalyze =
     draftSubject.trim().length > 0 &&
@@ -867,9 +870,13 @@ function CreateTemplateDialog({
     >
       <DialogContent className="max-w-[95vw] lg:max-w-7xl p-0 gap-0 rounded-3xl h-[95vh] flex flex-col">
         <div className="border-b bg-slate-50 px- rounded-3xl py-6 lg:px-12 flex-shrink-0">
-          <DialogTitle className="text-2xl font-semibold">Create Email Template</DialogTitle>
+          <DialogTitle className="text-2xl font-semibold">
+            {isEditing ? "Edit Email Template" : "Create Email Template"}
+          </DialogTitle>
           <DialogDescription className="text-slate-500">
-            Design a professional reusable email template
+            {isEditing
+              ? "Update your professional reusable email template"
+              : "Design a professional reusable email template"}
           </DialogDescription>
         </div>
 
@@ -959,7 +966,7 @@ function CreateTemplateDialog({
             Cancel
           </Button>
           <Button
-            onClick={onCreate}
+            onClick={onSubmit}
             disabled={
               saving ||
               analyzing ||
@@ -973,8 +980,10 @@ function CreateTemplateDialog({
             {saving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Creating...
+                {isEditing ? "Updating..." : "Creating..."}
               </>
+            ) : isEditing ? (
+              "Update Template"
             ) : (
               "Create Template"
             )}
@@ -1124,7 +1133,8 @@ export default function EmailTemplatesPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null)
   const [draftSubject, setDraftSubject] = useState("")
   const [draftBody, setDraftBody] = useState("")
   const [saving, setSaving] = useState(false)
@@ -1155,6 +1165,8 @@ export default function EmailTemplatesPage() {
   const [declaringWinner, setDeclaringWinner] = useState(false)
 
   const quillRef = useRef<any>(null)
+
+  const isEditing = !!editingTemplate
 
   useEffect(() => {
     const user = localStorage.getItem("user")
@@ -1259,6 +1271,7 @@ export default function EmailTemplatesPage() {
   const resetDraft = () => {
     setDraftSubject("")
     setDraftBody("")
+    setEditingTemplate(null)
   }
 
   const createTemplateApi = async (subject: string, body: string): Promise<EmailTemplate> => {
@@ -1268,6 +1281,23 @@ export default function EmailTemplatesPage() {
       body: JSON.stringify({ userId, subject: subject.trim(), body }),
     })
     if (!res.ok) throw new Error("Failed to create template")
+    return res.json()
+  }
+
+  const updateTemplateApi = async (
+    id: string,
+    subject: string,
+    body: string
+  ): Promise<EmailTemplate> => {
+    const res = await fetch(`/api/email-templates?id=${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subject: subject.trim(), body }),
+    })
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}))
+      throw new Error(errData?.error || "Failed to update template")
+    }
     return res.json()
   }
 
@@ -1358,21 +1388,39 @@ export default function EmailTemplatesPage() {
     }
   }
 
-  const handleCreate = async () => {
+  const handleFormSubmit = async () => {
     if (!draftSubject.trim() || !draftBody.trim() || draftBody === "<p><br></p>" || !userId)
       return
 
     setSaving(true)
     try {
-      const newTemplate = await createTemplateApi(draftSubject, draftBody)
-      setTemplates((prev) => [newTemplate, ...prev])
-      setIsCreateOpen(false)
-      resetDraft()
-      resetAiState()
-      showToast("Template created successfully")
+      if (isEditing && editingTemplate) {
+        const updated = await updateTemplateApi(
+          editingTemplate.id,
+          draftSubject,
+          draftBody
+        )
+        setTemplates((prev) =>
+          prev.map((t) => (t.id === updated.id ? updated : t))
+        )
+        setIsFormOpen(false)
+        resetDraft()
+        resetAiState()
+        showToast("Template updated successfully")
+      } else {
+        const newTemplate = await createTemplateApi(draftSubject, draftBody)
+        setTemplates((prev) => [newTemplate, ...prev])
+        setIsFormOpen(false)
+        resetDraft()
+        resetAiState()
+        showToast("Template created successfully")
+      }
     } catch (err) {
       console.error(err)
-      showToast("Failed to create template", "error")
+      showToast(
+        isEditing ? "Failed to update template" : "Failed to create template",
+        "error"
+      )
     } finally {
       setSaving(false)
     }
@@ -1408,6 +1456,11 @@ export default function EmailTemplatesPage() {
         setViewingTemplate(null)
         resetAiState()
       }
+      if (editingTemplate?.id === id) {
+        setIsFormOpen(false)
+        resetDraft()
+        resetAiState()
+      }
       showToast("Template deleted successfully")
     } catch (err) {
       console.error(err)
@@ -1430,6 +1483,10 @@ export default function EmailTemplatesPage() {
         // Reuse the existing template as Variant A
         variantAId = viewingTemplate.id
         variantASubject = viewingTemplate.subject
+      } else if (isEditing && editingTemplate) {
+        // Editing: reuse current template as Variant A
+        variantAId = editingTemplate.id
+        variantASubject = editingTemplate.subject
       } else {
         // Create Variant A from original draft content
         const a = await createTemplateApi(
@@ -1465,7 +1522,7 @@ export default function EmailTemplatesPage() {
 
       setShowImprovement(false)
       setImprovedEmail(null)
-      setIsCreateOpen(false)
+      setIsFormOpen(false)
       resetDraft()
       resetAiState()
       setViewingTemplate(null)
@@ -1512,12 +1569,12 @@ export default function EmailTemplatesPage() {
     analyzeEmail(viewingTemplate.subject, viewingTemplate.body, "view")
   }
 
-  const handleAnalyzeFromCreate = () => {
+  const handleAnalyzeFromForm = () => {
     analyzeEmail(draftSubject, draftBody, "create")
   }
 
   /** Re-analyze always uses CURRENT editor / template content */
-  const handleReanalyzeFromCreate = () => {
+  const handleReanalyzeFromForm = () => {
     analyzeEmail(draftSubject, draftBody, "create", { keepPrevious: true })
   }
 
@@ -1533,7 +1590,7 @@ export default function EmailTemplatesPage() {
     improveEmail(viewingTemplate.subject, viewingTemplate.body, analysis)
   }
 
-  const handleImproveFromCreate = () => {
+  const handleImproveFromForm = () => {
     if (!analysis) return
     improveEmail(draftSubject, draftBody, analysis)
   }
@@ -1550,9 +1607,12 @@ export default function EmailTemplatesPage() {
     setShowImprovement(false)
     setImprovedEmail(null)
     if (analysisContext === "view") {
+      // From view → open form in create mode with improved content
       setViewingTemplate(null)
-      setIsCreateOpen(true)
+      setEditingTemplate(null)
+      setIsFormOpen(true)
     }
+    // If already in form (create or edit), just update the draft fields
     setAnalysis(null)
     setAnalysisContext(null)
     setImproveSource(null)
@@ -1562,6 +1622,20 @@ export default function EmailTemplatesPage() {
   const handleKeepOriginal = () => {
     setShowImprovement(false)
     setImprovedEmail(null)
+  }
+
+  const openCreate = () => {
+    resetAiState()
+    resetDraft()
+    setIsFormOpen(true)
+  }
+
+  const openEdit = (template: EmailTemplate) => {
+    resetAiState()
+    setEditingTemplate(template)
+    setDraftSubject(template.subject)
+    setDraftBody(template.body)
+    setIsFormOpen(true)
   }
 
   const currentABTest = viewingTemplate
@@ -1591,10 +1665,7 @@ export default function EmailTemplatesPage() {
           </div>
 
           <Button
-            onClick={() => {
-              resetAiState()
-              setIsCreateOpen(true)
-            }}
+            onClick={openCreate}
             className="gap-2 bg-blue-600 h-11 px-6"
           >
             <Plus className="h-4 w-4" />
@@ -1690,7 +1761,7 @@ export default function EmailTemplatesPage() {
                     {stripHtml(template.body)}
                   </p>
 
-                  <div className="mt-8 flex items-center gap-3 pt-4 border-t flex-shrink-0">
+                  <div className="mt-8 flex items-center gap-2 pt-4 border-t flex-shrink-0">
                     <Button
                       variant="default"
                       onClick={() => {
@@ -1703,10 +1774,20 @@ export default function EmailTemplatesPage() {
                       View Full
                     </Button>
                     <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => openEdit(template)}
+                      className="text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200"
+                      title="Edit template"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => setDeletingTemplate(template)}
                       className="text-slate-400 hover:text-red-600 hover:bg-red-50"
+                      title="Delete template"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -1723,10 +1804,7 @@ export default function EmailTemplatesPage() {
               Create your first professional email template
             </p>
             <Button
-              onClick={() => {
-                resetAiState()
-                setIsCreateOpen(true)
-              }}
+              onClick={openCreate}
               className="mt-8"
             >
               Create Template
@@ -1735,10 +1813,10 @@ export default function EmailTemplatesPage() {
         )}
       </div>
 
-      <CreateTemplateDialog
-        isOpen={isCreateOpen}
+      <TemplateFormDialog
+        isOpen={isFormOpen}
         onOpenChange={(open) => {
-          setIsCreateOpen(open)
+          setIsFormOpen(open)
           if (!open) {
             resetDraft()
             resetAiState()
@@ -1748,15 +1826,15 @@ export default function EmailTemplatesPage() {
         setDraftSubject={setDraftSubject}
         draftBody={draftBody}
         setDraftBody={setDraftBody}
-        onCreate={handleCreate}
+        onSubmit={handleFormSubmit}
         saving={saving}
         quillRef={quillRef}
         analyzing={analyzing && analysisContext === "create"}
         analysis={analysisContext === "create" ? analysis : null}
         improving={improving && analysisContext === "create"}
-        onAnalyze={handleAnalyzeFromCreate}
-        onImprove={handleImproveFromCreate}
-        onReanalyze={handleReanalyzeFromCreate}
+        onAnalyze={handleAnalyzeFromForm}
+        onImprove={handleImproveFromForm}
+        onReanalyze={handleReanalyzeFromForm}
         onClearAnalysis={() => {
           if (analysisContext === "create") {
             setAnalysis(null)
@@ -1764,6 +1842,7 @@ export default function EmailTemplatesPage() {
             setImproveSource(null)
           }
         }}
+        isEditing={isEditing}
       />
 
       <ViewTemplateDialog

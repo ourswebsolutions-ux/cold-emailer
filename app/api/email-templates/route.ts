@@ -116,3 +116,56 @@ export async function DELETE(req: NextRequest) {
     );
   }
 }
+
+
+export async function PUT(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+
+    const id = searchParams.get("id");
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "id is required" },
+        { status: 400 }
+      );
+    }
+
+    const { subject, body } = await req.json();
+
+    if (!subject || !body) {
+      return NextResponse.json(
+        { error: "subject and body are required" },
+        { status: 400 }
+      );
+    }
+
+    const existingTemplate = await prisma.emailTemplate.findUnique({
+      where: { id },
+    });
+
+    if (!existingTemplate) {
+      return NextResponse.json(
+        { error: "Template not found" },
+        { status: 404 }
+      );
+    }
+
+    const template = await prisma.emailTemplate.update({
+      where: { id },
+      data: {
+        subject,
+        body,
+      },
+    });
+
+    return NextResponse.json(template);
+  } catch (error) {
+    console.error(error);
+
+    return NextResponse.json(
+      { error: "Failed to update template" },
+      { status: 500 }
+    );
+  }
+}
