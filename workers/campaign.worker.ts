@@ -16,6 +16,50 @@ const activeCampaigns = new Set<string>();
 
 /**
  * ============================================================
+ * SMTP ROTATION STATE
+ * ============================================================
+ *
+ * Har campaign ka apna random SMTP queue hoga.
+ *
+ * Example:
+ *
+ * SMTP A
+ * SMTP B
+ * SMTP C
+ *
+ * Random queue:
+ *
+ * C -> A -> B
+ *
+ * Next cycle:
+ *
+ * B -> C -> A
+ *
+ * Is tarah same SMTP consecutive send nahi karega.
+ */
+
+const smtpQueues = new Map<string, string[]>();
+
+/**
+ * Last SMTP used by campaign.
+ *
+ * Extra safety:
+ * refill ke waqt previous SMTP ko immediately
+ * dobara select nahi hone denge.
+ */
+
+const lastUsedSmtp = new Map<string, string>();
+
+/**
+ * ============================================================
+ * TEMPLATE ROTATION STATE
+ * ============================================================
+ */
+
+const templateQueues = new Map<string, string[]>();
+
+/**
+ * ============================================================
  * HELPERS
  * ============================================================
  */
@@ -26,44 +70,20 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-function intervalToMs(
-  value: number | null | undefined,
-  unit: string | null | undefined
-): number {
-  const safeValue = Number(value);
+/**
+ * Fisher-Yates shuffle
+ */
 
-  if (!Number.isFinite(safeValue) || safeValue <= 0) {
-    return 60_000;
+function shuffle<T>(items: T[]): T[] {
+  const array = [...items];
+
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+
+    [array[i], array[j]] = [array[j], array[i]];
   }
 
-  switch ((unit || "minutes").toLowerCase()) {
-    case "second":
-    case "seconds":
-      return safeValue * 1_000;
-
-    case "minute":
-    case "minutes":
-      return safeValue * 60_000;
-
-    case "hour":
-    case "hours":
-      return safeValue * 60 * 60_000;
-
-    case "day":
-    case "days":
-      return safeValue * 24 * 60 * 60_000;
-
-    default:
-      return 60_000;
-  }
-}
-
-function getCampaignType(
-  campaignType: string | null | undefined
-): "EMAIL" | "FOLLOW_UP" {
-  return campaignType === "EMAIL"
-    ? "EMAIL"
-    : "FOLLOW_UP";
+  return array;
 }
 
 /**
@@ -71,29 +91,336 @@ function getCampaignType(
  * RANDOM SMTP
  * ============================================================
  *
- * Campaign ke andar jitne bhi SMTP selected hain:
+ * IMPORTANT:
  *
- * 2
- * 5
- * 50
- * 100
- * 1000
+ * Simple Math.random() use nahi kar rahe.
  *
- * koi hardcoded limit nahi.
+ * Pool ko shuffle karke one-by-one use karenge.
  *
- * Har email send par fresh random SMTP select hota hai.
+ * Agar campaign mein:
+ *
+ * A
+ * B
+ * C
+ *
+ * hain to:
+ *
+ * C
+ * A
+ * B
+ *
+ * phir next cycle:
+ *
+ * B
+ * C
+ * A
+ *
+ * Same SMTP consecutive nahi aayega.
  */
 
-function getRandomSmtp<T>(smtpConfigs: T[]): T | null {
+function getRandomSmtp<
+  T extends {
+    id: string;
+  }
+>(
+  campaignId: string,
+  smtpConfigs: T[]
+): T | null {
   if (!smtpConfigs.length) {
     return null;
   }
 
-  const randomIndex = Math.floor(
-    Math.random() * smtpConfigs.length
+  const smtpById = new Map(
+    smtpConfigs.map((smtp) => [
+      smtp.id,
+      smtp,
+    ])
   );
 
-  return smtpConfigs[randomIndex] ?? null;
+  let queue =
+    smtpQueues.get(campaignId) || [];
+
+  /**
+   * Remove SMTPs jo ab campaign mein nahi hain.
+   */
+  queue = queue.filter((id) =>
+    smtpById.has(id)
+  );
+
+  /**
+   * Agar queue empty hai to new random cycle.
+   */
+  if (queue.length === 0) {
+    queue = shuffle(
+      smtpConfigs.map(
+        (smtp) => smtp.id
+      )
+    );
+
+    /**
+     * Previous SMTP ko next cycle ke first position
+     * par aane se prevent karo.
+     */
+    const previous =
+      lastUsedSmtp.get(campaignId);
+
+    if (
+      previous &&
+      queue.length > 1 &&
+      queue[0] === previous
+    ) {
+      const swapIndex = 1;
+
+      [
+        queue[0],
+        queue[swapIndex],
+      ] = [
+        queue[swapIndex],
+        queue[0],
+      ];
+    }
+  }
+
+  const selectedId =
+    queue.shift();
+
+  if (!selectedId) {
+    return null;
+  }
+
+  smtpQueues.set(
+    campaignId,
+    queue
+  );
+
+  lastUsedSmtp.set(
+    campaignId,
+    selectedId
+  );
+
+  return (
+    smtpById.get(
+      selectedId
+    ) || null
+  );
+}
+
+/**
+ * ============================================================
+ * RANDOM TEMPLATE
+ * ============================================================
+ *
+ * Templates ko bhi random cycle mein use karo.
+ *
+ * Example:
+ *
+ * T1
+ * T2
+ * T3
+ *
+ * random:
+ *
+ * T2 -> T1 -> T3
+ *
+ * next:
+ *
+ * T3 -> T2 -> T1
+ */
+
+function getRandomTemplate<
+  T extends {
+    id: string;
+  }
+>(
+  stepKey: string,
+  templates: T[]
+): T | null {
+  if (!templates.length) {
+    return null;
+  }
+
+  const templateById =
+    new Map(
+      templates.map(
+        (template) => [
+          template.id,
+          template,
+        ]
+      )
+    );
+
+  let queue =
+    templateQueues.get(
+      stepKey
+    ) || [];
+
+  queue = queue.filter(
+    (id) =>
+      templateById.has(id)
+  );
+
+  if (queue.length === 0) {
+    queue = shuffle(
+      templates.map(
+        (template) =>
+          template.id
+      )
+    );
+  }
+
+  const selectedId =
+    queue.shift();
+
+  templateQueues.set(
+    stepKey,
+    queue
+  );
+
+  if (!selectedId) {
+    return null;
+  }
+
+  return (
+    templateById.get(
+      selectedId
+    ) || null
+  );
+}
+
+/**
+ * ============================================================
+ * CLEAN EMAIL
+ * ============================================================
+ */
+
+function cleanEmail(
+  value: string | null | undefined
+): string {
+  return String(value || "")
+    .trim();
+}
+
+/**
+ * ============================================================
+ * HTML -> TEXT
+ * ============================================================
+ */
+
+function htmlToText(
+  html: string
+): string {
+  return String(html || "")
+    .replace(
+      /<br\s*\/?>/gi,
+      "\n"
+    )
+    .replace(
+      /<\/p>/gi,
+      "\n\n"
+    )
+    .replace(
+      /<[^>]*>/g,
+      ""
+    )
+    .replace(
+      /&nbsp;/gi,
+      " "
+    )
+    .replace(
+      /&amp;/gi,
+      "&"
+    )
+    .replace(
+      /&lt;/gi,
+      "<"
+    )
+    .replace(
+      /&gt;/gi,
+      ">"
+    )
+    .trim();
+}
+
+/**
+ * ============================================================
+ * INTERVAL
+ * ============================================================
+ */
+
+function intervalToMs(
+  value: number | null | undefined,
+  unit: string | null | undefined
+): number {
+  const safeValue =
+    Number(value);
+
+  if (
+    !Number.isFinite(
+      safeValue
+    ) ||
+    safeValue <= 0
+  ) {
+    return 60_000;
+  }
+
+  switch (
+    (
+      unit ||
+      "minutes"
+    ).toLowerCase()
+  ) {
+    case "second":
+    case "seconds":
+      return (
+        safeValue *
+        1_000
+      );
+
+    case "minute":
+    case "minutes":
+      return (
+        safeValue *
+        60_000
+      );
+
+    case "hour":
+    case "hours":
+      return (
+        safeValue *
+        60 *
+        60_000
+      );
+
+    case "day":
+    case "days":
+      return (
+        safeValue *
+        24 *
+        60 *
+        60_000
+      );
+
+    default:
+      return 60_000;
+  }
+}
+
+/**
+ * ============================================================
+ * CAMPAIGN TYPE
+ * ============================================================
+ */
+
+function getCampaignType(
+  campaignType:
+    | string
+    | null
+    | undefined
+): "EMAIL" | "FOLLOW_UP" {
+  return campaignType ===
+    "EMAIL"
+    ? "EMAIL"
+    : "FOLLOW_UP";
 }
 
 /**
@@ -104,47 +431,77 @@ function getRandomSmtp<T>(smtpConfigs: T[]): T | null {
 
 function isWithinSendingWindow(
   now: Date,
-  timezone: string | null | undefined,
-  sendingStart: string | null | undefined,
-  sendingEnd: string | null | undefined
+  timezone:
+    | string
+    | null
+    | undefined,
+  sendingStart:
+    | string
+    | null
+    | undefined,
+  sendingEnd:
+    | string
+    | null
+    | undefined
 ): boolean {
   try {
-    const formatter = new Intl.DateTimeFormat(
-      "en-US",
-      {
-        timeZone:
-          timezone || "Asia/Karachi",
+    const formatter =
+      new Intl.DateTimeFormat(
+        "en-US",
+        {
+          timeZone:
+            timezone ||
+            "Asia/Karachi",
 
-        hour: "2-digit",
-        minute: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
 
-        hour12: false,
-      }
-    );
+          hour12: false,
+        }
+      );
 
-    const parts = formatter.formatToParts(now);
+    const parts =
+      formatter.formatToParts(
+        now
+      );
 
-    const hour = Number(
-      parts.find(
-        (part) => part.type === "hour"
-      )?.value || 0
-    );
+    const hour =
+      Number(
+        parts.find(
+          (part) =>
+            part.type ===
+            "hour"
+        )?.value || 0
+      );
 
-    const minute = Number(
-      parts.find(
-        (part) => part.type === "minute"
-      )?.value || 0
-    );
+    const minute =
+      Number(
+        parts.find(
+          (part) =>
+            part.type ===
+            "minute"
+        )?.value || 0
+      );
 
-    const [startHour, startMinute] =
-      (sendingStart || "09:00")
-        .split(":")
-        .map(Number);
+    const [
+      startHour,
+      startMinute,
+    ] = (
+      sendingStart ||
+      "09:00"
+    )
+      .split(":")
+      .map(Number);
 
-    const [endHour, endMinute] =
-      (sendingEnd || "18:00")
-        .split(":")
-        .map(Number);
+    const [
+      endHour,
+      endMinute,
+    ] = (
+      sendingEnd ||
+      "18:00"
+    )
+      .split(":")
+      .map(Number);
 
     const current =
       hour * 60 + minute;
@@ -157,10 +514,6 @@ function isWithinSendingWindow(
       endHour * 60 +
       endMinute;
 
-    /**
-     * Normal:
-     * 09:00 -> 18:00
-     */
     if (start <= end) {
       return (
         current >= start &&
@@ -168,10 +521,6 @@ function isWithinSendingWindow(
       );
     }
 
-    /**
-     * Overnight:
-     * 22:00 -> 06:00
-     */
     return (
       current >= start ||
       current < end
@@ -190,9 +539,11 @@ function isWithinSendingWindow(
 async function getDailySentCount(
   campaignId: string
 ): Promise<number> {
-  const now = new Date();
+  const now =
+    new Date();
 
-  const startOfDay = new Date(now);
+  const startOfDay =
+    new Date(now);
 
   startOfDay.setHours(
     0,
@@ -201,73 +552,72 @@ async function getDailySentCount(
     0
   );
 
-  return prisma.followUpRecipientStep.count({
-    where: {
-      status: "SENT",
+  return prisma
+    .followUpRecipientStep
+    .count({
+      where: {
+        status: "SENT",
 
-      sentAt: {
-        gte: startOfDay,
-        lte: now,
-      },
+        sentAt: {
+          gte: startOfDay,
+          lte: now,
+        },
 
-      recipient: {
-        campaignId,
+        recipient: {
+          campaignId,
+        },
       },
-    },
-  });
+    });
 }
 
 /**
  * ============================================================
- * INITIALIZE STEP SCHEDULES
+ * INITIALIZE PENDING STEPS
  * ============================================================
- *
- * Agar initial step ka scheduledAt NULL hai:
- *
- * immediately executable.
- *
- * Step 1:
- * scheduledAt = now
- *
- * Is se null ka matlab immediate start hoga.
  */
 
 async function initializePendingSteps(
   campaignId: string
 ): Promise<void> {
-  const now = new Date();
+  const now =
+    new Date();
 
   const result =
-    await prisma.followUpRecipientStep.updateMany({
-      where: {
-        status: "PENDING",
+    await prisma
+      .followUpRecipientStep
+      .updateMany({
+        where: {
+          status:
+            "PENDING",
 
-        scheduledAt: null,
+          scheduledAt:
+            null,
 
-        recipient: {
-          campaignId,
+          recipient: {
+            campaignId,
 
-          status: {
-            in: [
-              "PENDING",
-              "COMPLETED",
-            ],
+            status: {
+              in: [
+                "PENDING",
+                "COMPLETED",
+              ],
+            },
+          },
+
+          step: {
+            enabled: true,
           },
         },
 
-        step: {
-          enabled: true,
+        data: {
+          scheduledAt:
+            now,
         },
-      },
-
-      data: {
-        scheduledAt: now,
-      },
-    });
+      });
 
   if (result.count > 0) {
     console.log(
-      `[FOLLOW-UP][${campaignId}] ⚡ Initialized ${result.count} pending step(s) immediately`
+      `[FOLLOW-UP][${campaignId}] ⚡ Initialized ${result.count} pending step(s)`
     );
   }
 }
@@ -281,105 +631,119 @@ async function initializePendingSteps(
 async function getNextDueStep(
   campaignId: string
 ) {
-  return prisma.followUpRecipientStep.findFirst({
-    where: {
-      status: "PENDING",
+  return prisma
+    .followUpRecipientStep
+    .findFirst({
+      where: {
+        status:
+          "PENDING",
 
-      scheduledAt: {
-        not: null,
-        lte: new Date(),
-      },
+        scheduledAt: {
+          not: null,
+          lte:
+            new Date(),
+        },
 
-      recipient: {
-        campaignId,
+        recipient: {
+          campaignId,
 
-        status: {
-          in: [
-            "PENDING",
-            "RUNNING",
-          ],
+          status: {
+            in: [
+              "PENDING",
+              "RUNNING",
+            ],
+          },
+        },
+
+        step: {
+          enabled: true,
         },
       },
 
-      step: {
-        enabled: true,
-      },
-    },
+      include: {
+        step: {
+          include: {
+            templates: true,
+          },
+        },
 
-    include: {
-      step: true,
-
-      recipient: {
-        include: {
-          email: true,
+        recipient: {
+          include: {
+            email: true,
+          },
         },
       },
-    },
 
-    orderBy: {
-      scheduledAt: "asc",
-    },
-  });
+      orderBy: {
+        scheduledAt:
+          "asc",
+      },
+    });
 }
 
 /**
  * ============================================================
- * NEXT SCHEDULED STEP
+ * GET NEXT SCHEDULED STEP
  * ============================================================
  */
 
 async function getNextScheduledFollowUp(
   campaignId: string
 ) {
-  return prisma.followUpRecipientStep.findFirst({
-    where: {
-      status: "PENDING",
+  return prisma
+    .followUpRecipientStep
+    .findFirst({
+      where: {
+        status:
+          "PENDING",
 
-      scheduledAt: {
-        not: null,
-      },
+        scheduledAt: {
+          not: null,
+        },
 
-      recipient: {
-        campaignId,
+        recipient: {
+          campaignId,
 
-        status: {
-          in: [
-            "PENDING",
-            "RUNNING",
-          ],
+          status: {
+            in: [
+              "PENDING",
+              "RUNNING",
+            ],
+          },
+        },
+
+        step: {
+          enabled: true,
         },
       },
 
-      step: {
-        enabled: true,
-      },
-    },
+      include: {
+        step: true,
 
-    include: {
-      step: true,
-
-      recipient: {
-        include: {
-          email: true,
+        recipient: {
+          include: {
+            email: true,
+          },
         },
       },
-    },
 
-    orderBy: {
-      scheduledAt: "asc",
-    },
-  });
+      orderBy: {
+        scheduledAt:
+          "asc",
+      },
+    });
 }
 
 /**
  * ============================================================
- * LOG NEXT STEP
+ * LOG NEXT FOLLOW UP
  * ============================================================
  */
 
 async function logNextFollowUp(
   campaignId: string,
-  timezone = "Asia/Karachi"
+  timezone =
+    "Asia/Karachi"
 ): Promise<void> {
   const next =
     await getNextScheduledFollowUp(
@@ -397,35 +761,17 @@ async function logNextFollowUp(
   const scheduledAt =
     next.scheduledAt;
 
-  const now =
-    new Date();
-
   const remainingMs =
     scheduledAt.getTime() -
-    now.getTime();
+    Date.now();
 
   const remainingMinutes =
     Math.max(
       0,
       Math.ceil(
-        remainingMs / 60_000
+        remainingMs /
+          60_000
       )
-    );
-
-  const localTime =
-    scheduledAt.toLocaleString(
-      "en-PK",
-      {
-        timeZone:
-          timezone ||
-          "Asia/Karachi",
-
-        dateStyle:
-          "medium",
-
-        timeStyle:
-          "medium",
-      }
     );
 
   console.log(
@@ -444,7 +790,20 @@ async function logNextFollowUp(
   );
 
   console.log(
-    `[FOLLOW-UP][${campaignId}] 🌍 Local: ${localTime}`
+    `[FOLLOW-UP][${campaignId}] 🌍 Local: ${scheduledAt.toLocaleString(
+      "en-PK",
+      {
+        timeZone:
+          timezone ||
+          "Asia/Karachi",
+
+        dateStyle:
+          "medium",
+
+        timeStyle:
+          "medium",
+      }
+    )}`
   );
 
   console.log(
@@ -498,41 +857,36 @@ async function processOneRecipientStep(
   );
 
   console.log(
-    `[FOLLOW-UP][${campaign.id}] Step: ${
-      recipientStep.step.stepNumber
-    }`
-  );
-
-  console.log(
-    `[FOLLOW-UP][${campaign.id}] Scheduled: ${
-      recipientStep.scheduledAt?.toISOString() ||
-      "IMMEDIATE"
-    }`
+    `[FOLLOW-UP][${campaign.id}] Step: ${recipientStep.step.stepNumber}`
   );
 
   /**
    * ========================================================
-   * CLAIM STEP
+   * CLAIM
    * ========================================================
-   *
-   * Multiple workers/processes hon tab bhi
-   * same step double-send nahi hoga.
    */
 
   const claimed =
-    await prisma.followUpRecipientStep.updateMany({
-      where: {
-        id: recipientStep.id,
+    await prisma
+      .followUpRecipientStep
+      .updateMany({
+        where: {
+          id:
+            recipientStep.id,
 
-        status: "PENDING",
-      },
+          status:
+            "PENDING",
+        },
 
-      data: {
-        status: "SENDING",
-      },
-    });
+        data: {
+          status:
+            "SENDING",
+        },
+      });
 
-  if (claimed.count !== 1) {
+  if (
+    claimed.count !== 1
+  ) {
     console.log(
       `[FOLLOW-UP][${campaign.id}] ⚠️ Step already claimed`
     );
@@ -556,36 +910,50 @@ async function processOneRecipientStep(
    * ========================================================
    */
 
-  if (!email?.email) {
+  const recipientEmail =
+    cleanEmail(
+      email?.email
+    );
+
+  if (!recipientEmail) {
     const error =
       "Recipient email is missing";
 
-    await prisma.followUpRecipientStep.update({
-      where: {
-        id: recipientStep.id,
-      },
+    await prisma
+      .followUpRecipientStep
+      .update({
+        where: {
+          id:
+            recipientStep.id,
+        },
 
-      data: {
-        status: "FAILED",
+        data: {
+          status:
+            "FAILED",
 
-        failedAt:
-          new Date(),
+          failedAt:
+            new Date(),
 
-        error,
-      },
-    });
+          error,
+        },
+      });
 
-    await prisma.followUpRecipient.update({
-      where: {
-        id: recipient.id,
-      },
+    await prisma
+      .followUpRecipient
+      .update({
+        where: {
+          id:
+            recipient.id,
+        },
 
-      data: {
-        status: "FAILED",
+        data: {
+          status:
+            "FAILED",
 
-        nextStepAt: null,
-      },
-    });
+          nextStepAt:
+            null,
+        },
+      });
 
     console.log(
       `[FOLLOW-UP][${campaign.id}] ❌ ${error}`
@@ -596,21 +964,13 @@ async function processOneRecipientStep(
 
   /**
    * ========================================================
-   * RANDOM SMTP
+   * RANDOM SMTP FROM CAMPAIGN
    * ========================================================
-   *
-   * IMPORTANT:
-   *
-   * campaign.smtpConfigs array se random SMTP.
-   *
-   * isActive check intentionally nahi.
-   *
-   * Campaign mein jo SMTP selected hain
-   * woh pool hain.
    */
 
   const smtp =
     getRandomSmtp(
+      campaign.id,
       campaign.smtpConfigs
     );
 
@@ -622,35 +982,50 @@ async function processOneRecipientStep(
       `[FOLLOW-UP][${campaign.id}] ❌ ${error}`
     );
 
-    await prisma.followUpRecipientStep.update({
-      where: {
-        id: recipientStep.id,
-      },
+    await prisma
+      .followUpRecipientStep
+      .update({
+        where: {
+          id:
+            recipientStep.id,
+        },
 
-      data: {
-        status: "FAILED",
+        data: {
+          status:
+            "FAILED",
 
-        failedAt:
-          new Date(),
+          failedAt:
+            new Date(),
 
-        error,
-      },
-    });
+          error,
+        },
+      });
 
-    await prisma.followUpRecipient.update({
-      where: {
-        id: recipient.id,
-      },
+    await prisma
+      .followUpRecipient
+      .update({
+        where: {
+          id:
+            recipient.id,
+        },
 
-      data: {
-        status: "FAILED",
+        data: {
+          status:
+            "FAILED",
 
-        nextStepAt: null,
-      },
-    });
+          nextStepAt:
+            null,
+        },
+      });
 
     return false;
   }
+
+  const senderEmail =
+    cleanEmail(
+      smtp.senderEmail ||
+        smtp.username
+    );
 
   console.log(
     `[FOLLOW-UP][${campaign.id}] 🎲 Random SMTP selected`
@@ -661,33 +1036,99 @@ async function processOneRecipientStep(
   );
 
   console.log(
-    `[FOLLOW-UP][${campaign.id}] 📤 SMTP Sender: ${smtp.senderEmail}`
+    `[FOLLOW-UP][${campaign.id}] 📤 SMTP Sender: ${senderEmail}`
   );
 
   /**
    * ========================================================
    * VARIABLES
    * ========================================================
+   *
+   * Multiple aliases support.
+   *
+   * {{name}}
+   * {{firstName}}
+   * {{email}}
+   * {{company}}
+   * {{companyName}}
+   * {{website}}
    */
 
   const variables = {
     name:
-      email.name,
+      email?.name || "",
+
+    firstName:
+      email?.name || "",
+
+    fullName:
+      email?.name || "",
 
     email:
-      email.email,
+      recipientEmail,
 
     company:
-      email.company,
+      email?.company || "",
+
+    companyName:
+      email?.company || "",
 
     website:
-      email.website,
+      email?.website || "",
   };
+
+  /**
+   * ========================================================
+   * RANDOM TEMPLATE
+   * ========================================================
+   */
+
+  const templates =
+    recipientStep.step
+      .templates || [];
+
+  console.log(
+    `[FOLLOW-UP][${campaign.id}] 🎲 Available templates: ${templates.length}`
+  );
+
+  const selectedTemplate =
+    getRandomTemplate(
+      `${campaign.id}:${recipientStep.step.id}`,
+      templates
+    );
+
+  let rawSubject =
+    recipientStep.step.subject;
+
+  let rawBody =
+    recipientStep.step.body;
+
+  if (selectedTemplate) {
+    rawSubject =
+      selectedTemplate.subject;
+
+    rawBody =
+      selectedTemplate.body;
+
+    console.log(
+      `[FOLLOW-UP][${campaign.id}] 🎲 Random template selected: ${selectedTemplate.id}`
+    );
+  } else {
+    console.log(
+      `[FOLLOW-UP][${campaign.id}] 📄 No template selected, using step content`
+    );
+  }
+
+  /**
+   * ========================================================
+   * APPLY VARIABLES
+   * ========================================================
+   */
 
   const subject =
     applySpinText(
       applyCampaignVariables(
-        recipientStep.step.subject,
+        rawSubject,
         variables
       )
     );
@@ -695,18 +1136,25 @@ async function processOneRecipientStep(
   const body =
     applySpinText(
       applyCampaignVariables(
-        recipientStep.step.body,
+        rawBody,
         variables
       )
     );
 
+  const textBody =
+    htmlToText(body);
+
   console.log(
-    `[FOLLOW-UP][${campaign.id}] 📧 Sending to: ${email.email}`
+    `[FOLLOW-UP][${campaign.id}] 📧 Sending to: ${recipientEmail}`
+  );
+
+  console.log(
+    `[FOLLOW-UP][${campaign.id}] 📝 Subject: ${subject}`
   );
 
   /**
    * ========================================================
-   * SEND
+   * SEND EMAIL
    * ========================================================
    */
 
@@ -726,14 +1174,15 @@ async function processOneRecipientStep(
             ) || 587,
 
           username:
-            smtp.username || "",
+            cleanEmail(
+              smtp.username
+            ),
 
           password:
             smtp.password || "",
 
           email:
-            smtp.senderEmail ||
-            smtp.username,
+            senderEmail,
 
           fromName:
             smtp.senderName,
@@ -743,18 +1192,15 @@ async function processOneRecipientStep(
         },
 
         to:
-          email.email,
+          recipientEmail,
 
         subject,
 
         text:
-          body,
+          textBody,
 
         html:
-          body.replace(
-            /\n/g,
-            "<br />"
-          ),
+          body,
       });
 
     console.log(
@@ -762,7 +1208,9 @@ async function processOneRecipientStep(
       sendResult
     );
 
-    if (!sendResult.success) {
+    if (
+      !sendResult.success
+    ) {
       throw new Error(
         sendResult.error ||
           "SMTP send failed"
@@ -783,45 +1231,45 @@ async function processOneRecipientStep(
         /**
          * Current step SENT
          */
-        await tx.followUpRecipientStep.update({
-          where: {
-            id:
-              recipientStep.id,
-          },
 
-          data: {
-            status:
-              "SENT",
+        await tx
+          .followUpRecipientStep
+          .update({
+            where: {
+              id:
+                recipientStep.id,
+            },
 
-            sentAt,
+            data: {
+              status:
+                "SENT",
 
-            failedAt:
-              null,
+              sentAt,
 
-            error:
-              null,
-          },
-        });
+              failedAt:
+                null,
+
+              error:
+                null,
+            },
+          });
 
         /**
-         * ====================================================
-         * FIND NEXT STEP
-         * ====================================================
+         * ==================================================
+         * NEXT STEP
+         * ==================================================
          */
 
         const nextStep =
           campaign.steps.find(
             (step) =>
               step.stepNumber >
-              recipientStep.step.stepNumber
+              recipientStep
+                .step
+                .stepNumber
           );
 
         if (nextStep) {
-          /**
-           * Next step delay is relative
-           * to current send time.
-           */
-
           const nextScheduledAt =
             new Date(
               sentAt
@@ -835,48 +1283,48 @@ async function processOneRecipientStep(
               )
           );
 
-          /**
-           * Schedule only the next step.
-           */
+          await tx
+            .followUpRecipientStep
+            .updateMany({
+              where: {
+                recipientId:
+                  recipient.id,
 
-          await tx.followUpRecipientStep.updateMany({
-            where: {
-              recipientId:
-                recipient.id,
+                stepId:
+                  nextStep.id,
 
-              stepId:
-                nextStep.id,
+                status:
+                  "PENDING",
+              },
 
-              status:
-                "PENDING",
-            },
+              data: {
+                scheduledAt:
+                  nextScheduledAt,
+              },
+            });
 
-            data: {
-              scheduledAt:
-                nextScheduledAt,
-            },
-          });
+          await tx
+            .followUpRecipient
+            .update({
+              where: {
+                id:
+                  recipient.id,
+              },
 
-          await tx.followUpRecipient.update({
-            where: {
-              id:
-                recipient.id,
-            },
+              data: {
+                status:
+                  "RUNNING",
 
-            data: {
-              status:
-                "RUNNING",
+                currentStep:
+                  nextStep.stepNumber,
 
-              currentStep:
-                nextStep.stepNumber,
+                lastSentAt:
+                  sentAt,
 
-              lastSentAt:
-                sentAt,
-
-              nextStepAt:
-                nextScheduledAt,
-            },
-          });
+                nextStepAt:
+                  nextScheduledAt,
+              },
+            });
 
           console.log(
             `[FOLLOW-UP][${campaign.id}] 📅 Next step ${nextStep.stepNumber} scheduled`
@@ -885,23 +1333,6 @@ async function processOneRecipientStep(
           console.log(
             `[FOLLOW-UP][${campaign.id}] 🕐 UTC: ${nextScheduledAt.toISOString()}`
           );
-
-          console.log(
-            `[FOLLOW-UP][${campaign.id}] 🇵🇰 Pakistan: ${nextScheduledAt.toLocaleString(
-              "en-PK",
-              {
-                timeZone:
-                  campaign.timezone ||
-                  "Asia/Karachi",
-
-                dateStyle:
-                  "medium",
-
-                timeStyle:
-                  "medium",
-              }
-            )}`
-          );
         } else {
           /**
            * ==================================================
@@ -909,59 +1340,67 @@ async function processOneRecipientStep(
            * ==================================================
            */
 
-          await tx.followUpRecipient.update({
-            where: {
-              id:
-                recipient.id,
-            },
-
-            data: {
-              status:
-                "COMPLETED",
-
-              currentStep:
-                recipientStep
-                  .step
-                  .stepNumber,
-
-              lastSentAt:
-                sentAt,
-
-              nextStepAt:
-                null,
-
-              completedAt:
-                sentAt,
-            },
-          });
-
-          const remaining =
-            await tx.followUpRecipient.count({
-              where: {
-                campaignId:
-                  campaign.id,
-
-                status: {
-                  in: [
-                    "PENDING",
-                    "RUNNING",
-                  ],
-                },
-              },
-            });
-
-          if (remaining === 0) {
-            await tx.followUpCampaign.update({
+          await tx
+            .followUpRecipient
+            .update({
               where: {
                 id:
-                  campaign.id,
+                  recipient.id,
               },
 
               data: {
                 status:
                   "COMPLETED",
+
+                currentStep:
+                  recipientStep
+                    .step
+                    .stepNumber,
+
+                lastSentAt:
+                  sentAt,
+
+                nextStepAt:
+                  null,
+
+                completedAt:
+                  sentAt,
               },
             });
+
+          const remaining =
+            await tx
+              .followUpRecipient
+              .count({
+                where: {
+                  campaignId:
+                    campaign.id,
+
+                  status: {
+                    in: [
+                      "PENDING",
+                      "RUNNING",
+                    ],
+                  },
+                },
+              });
+
+          if (
+            remaining === 0
+          ) {
+            await tx
+              .followUpCampaign
+              .update({
+                where: {
+                  id:
+                    campaign.id,
+                },
+
+                data: {
+                  status:
+                    "COMPLETED",
+                },
+              });
 
             console.log(
               `[FOLLOW-UP][${campaign.id}] 🏁 Campaign completed`
@@ -972,12 +1411,18 @@ async function processOneRecipientStep(
     );
 
     console.log(
-      `[FOLLOW-UP][${campaign.id}] 🎉 SENT -> ${email.email}`
+      `[FOLLOW-UP][${campaign.id}] 🎉 SENT -> ${recipientEmail}`
     );
 
     console.log(
-      `[FOLLOW-UP][${campaign.id}] 📤 Sent using SMTP -> ${smtp.senderEmail}`
+      `[FOLLOW-UP][${campaign.id}] 📤 SMTP -> ${senderEmail}`
     );
+
+    if (selectedTemplate) {
+      console.log(
+        `[FOLLOW-UP][${campaign.id}] 📝 Template -> ${selectedTemplate.id}`
+      );
+    }
 
     return true;
   } catch (error) {
@@ -987,45 +1432,49 @@ async function processOneRecipientStep(
         : String(error);
 
     console.error(
-      `[FOLLOW-UP][${campaign.id}] ❌ FAILED -> ${email.email}`,
+      `[FOLLOW-UP][${campaign.id}] ❌ FAILED -> ${recipientEmail}`,
       message
     );
 
-    await prisma.followUpRecipientStep.update({
-      where: {
-        id:
-          recipientStep.id,
-      },
+    await prisma
+      .followUpRecipientStep
+      .update({
+        where: {
+          id:
+            recipientStep.id,
+        },
 
-      data: {
-        status:
-          "FAILED",
+        data: {
+          status:
+            "FAILED",
 
-        failedAt:
-          new Date(),
+          failedAt:
+            new Date(),
 
-        error:
-          message.slice(
-            0,
-            2000
-          ),
-      },
-    });
+          error:
+            message.slice(
+              0,
+              2000
+            ),
+        },
+      });
 
-    await prisma.followUpRecipient.update({
-      where: {
-        id:
-          recipient.id,
-      },
+    await prisma
+      .followUpRecipient
+      .update({
+        where: {
+          id:
+            recipient.id,
+        },
 
-      data: {
-        status:
-          "FAILED",
+        data: {
+          status:
+            "FAILED",
 
-        nextStepAt:
-          null,
-      },
-    });
+          nextStepAt:
+            null,
+        },
+      });
 
     return false;
   }
@@ -1040,139 +1489,18 @@ async function processOneRecipientStep(
 async function getCampaignById(
   campaignId: string
 ) {
-  return prisma.followUpCampaign.findUnique({
-    where: {
-      id:
-        campaignId,
-    },
-
-    include: {
-      /**
-       * IMPORTANT:
-       *
-       * This is now ARRAY.
-       */
-
-      smtpConfigs: true,
-
-      steps: {
-        where: {
-          enabled:
-            true,
-        },
-
-        orderBy: {
-          stepNumber:
-            "asc",
-        },
-      },
-    },
-  });
-}
-
-/**
- * ============================================================
- * ACTIVATE SCHEDULED CAMPAIGNS
- * ============================================================
- *
- * Rules:
- *
- * SCHEDULED + scheduledAt NULL
- *     -> RUNNING immediately
- *
- * SCHEDULED + scheduledAt <= now
- *     -> RUNNING
- *
- * SCHEDULED + future date
- *     -> stay SCHEDULED
- *
- * RUNNING
- *     -> stay RUNNING
- */
-
-async function activateScheduledCampaigns() {
-  const now =
-    new Date();
-
-  /**
-   * NULL scheduledAt:
-   * immediate start.
-   */
-
-  const immediate =
-    await prisma.followUpCampaign.updateMany({
+  return prisma
+    .followUpCampaign
+    .findUnique({
       where: {
-        status:
-          "SCHEDULED",
-
-        scheduledAt:
-          null,
-      },
-
-      data: {
-        status:
-          "RUNNING",
-      },
-    });
-
-  if (immediate.count > 0) {
-    console.log(
-      `[FOLLOW-UP WORKER] 🚀 ${immediate.count} campaign(s) started immediately`
-    );
-  }
-
-  /**
-   * Scheduled time reached.
-   */
-
-  const scheduled =
-    await prisma.followUpCampaign.updateMany({
-      where: {
-        status:
-          "SCHEDULED",
-
-        scheduledAt: {
-          not: null,
-
-          lte:
-            now,
-        },
-      },
-
-      data: {
-        status:
-          "RUNNING",
-      },
-    });
-
-  if (scheduled.count > 0) {
-    console.log(
-      `[FOLLOW-UP WORKER] ⏰ ${scheduled.count} scheduled campaign(s) moved to RUNNING`
-    );
-  }
-}
-
-/**
- * ============================================================
- * GET RUNNING CAMPAIGNS
- * ============================================================
- */
-
-async function getRunningCampaigns() {
-  const campaigns =
-    await prisma.followUpCampaign.findMany({
-      where: {
-        status:
-          "RUNNING",
+        id:
+          campaignId,
       },
 
       include: {
         /**
-         * IMPORTANT:
-         *
-         * Multiple SMTPs.
+         * Selected SMTPs only.
          */
-
         smtpConfigs: true,
 
         steps: {
@@ -1185,20 +1513,171 @@ async function getRunningCampaigns() {
             stepNumber:
               "asc",
           },
+
+          /**
+           * IMPORTANT:
+           *
+           * Load templates with every step.
+           */
+          include: {
+            templates: true,
+          },
         },
       },
-
-      orderBy: {
-        createdAt:
-          "asc",
-      },
     });
+}
+
+/**
+ * ============================================================
+ * ACTIVATE SCHEDULED CAMPAIGNS
+ * ============================================================
+ */
+
+async function activateScheduledCampaigns() {
+  const now =
+    new Date();
+
+  const immediate =
+    await prisma
+      .followUpCampaign
+      .updateMany({
+        where: {
+          status:
+            "SCHEDULED",
+
+          scheduledAt:
+            null,
+        },
+
+        data: {
+          status:
+            "RUNNING",
+        },
+      });
+
+  if (
+    immediate.count > 0
+  ) {
+    console.log(
+      `[FOLLOW-UP WORKER] 🚀 ${immediate.count} campaign(s) started immediately`
+    );
+  }
+
+  const scheduled =
+    await prisma
+      .followUpCampaign
+      .updateMany({
+        where: {
+          status:
+            "SCHEDULED",
+
+          scheduledAt: {
+            not: null,
+
+            lte:
+              now,
+          },
+        },
+
+        data: {
+          status:
+            "RUNNING",
+        },
+      });
+
+  if (
+    scheduled.count > 0
+  ) {
+    console.log(
+      `[FOLLOW-UP WORKER] ⏰ ${scheduled.count} scheduled campaign(s) started`
+    );
+  }
+}
+
+/**
+ * ============================================================
+ * GET RUNNING CAMPAIGNS
+ * ============================================================
+ */
+
+async function getRunningCampaigns() {
+  const campaigns =
+    await prisma
+      .followUpCampaign
+      .findMany({
+        where: {
+          status:
+            "RUNNING",
+        },
+
+        include: {
+          smtpConfigs: true,
+
+          steps: {
+            where: {
+              enabled:
+                true,
+            },
+
+            orderBy: {
+              stepNumber:
+                "asc",
+            },
+
+            include: {
+              templates: true,
+            },
+          },
+        },
+
+        orderBy: {
+          createdAt:
+            "asc",
+        },
+      });
 
   console.log(
     `[FOLLOW-UP] Running campaigns: ${campaigns.length}`
   );
 
   return campaigns;
+}
+
+/**
+ * ============================================================
+ * CLEAN CAMPAIGN STATE
+ * ============================================================
+ */
+
+function cleanupCampaignState(
+  campaignId: string
+) {
+  smtpQueues.delete(
+    campaignId
+  );
+
+  lastUsedSmtp.delete(
+    campaignId
+  );
+
+  /**
+   * Templates are keyed by:
+   * campaignId:stepId
+   *
+   * Remove them too.
+   */
+
+  for (const key of templateQueues.keys()) {
+    if (
+      key.startsWith(
+        `${campaignId}:`
+      )
+    ) {
+      templateQueues.delete(
+        key
+      );
+    }
+  }
 }
 
 /**
@@ -1270,27 +1749,19 @@ async function processCampaign(
       "=================================================="
     );
 
-    /**
-     * Initialize null scheduledAt steps.
-     */
-
     await initializePendingSteps(
       campaignId
     );
 
     while (true) {
       try {
-        /**
-         * Reload campaign every loop.
-         */
-
         const campaign =
           await getCampaignById(
             campaignId
           );
 
         /**
-         * Deleted.
+         * Deleted
          */
 
         if (!campaign) {
@@ -1302,7 +1773,7 @@ async function processCampaign(
         }
 
         /**
-         * Status changed.
+         * Status changed
          */
 
         if (
@@ -1317,15 +1788,15 @@ async function processCampaign(
         }
 
         /**
-         * SMTP pool validation.
+         * SMTP validation
          */
 
         if (
-          campaign.smtpConfigs.length ===
-          0
+          campaign.smtpConfigs
+            .length === 0
         ) {
           console.log(
-            `[FOLLOW-UP][${campaignId}] ❌ No SMTP selected in campaign`
+            `[FOLLOW-UP][${campaignId}] ❌ No SMTP selected`
           );
 
           await sleep(
@@ -1336,7 +1807,7 @@ async function processCampaign(
         }
 
         /**
-         * Steps validation.
+         * Steps validation
          */
 
         if (
@@ -1350,10 +1821,6 @@ async function processCampaign(
           break;
         }
 
-        /**
-         * Ensure null initial schedules become immediate.
-         */
-
         await initializePendingSteps(
           campaignId
         );
@@ -1364,12 +1831,9 @@ async function processCampaign(
          * ====================================================
          */
 
-        const now =
-          new Date();
-
         const insideWindow =
           isWithinSendingWindow(
-            now,
+            new Date(),
 
             campaign.timezone,
 
@@ -1427,7 +1891,7 @@ async function processCampaign(
 
         /**
          * ====================================================
-         * GET DUE STEP
+         * DUE STEP
          * ====================================================
          */
 
@@ -1436,25 +1900,23 @@ async function processCampaign(
             campaignId
           );
 
-        /**
-         * ====================================================
-         * NO DUE STEP
-         * ====================================================
-         */
-
         if (!dueStep) {
           const next =
             await getNextScheduledFollowUp(
               campaignId
             );
 
-          if (next?.scheduledAt) {
+          if (
+            next?.scheduledAt
+          ) {
             const remaining =
               Math.max(
                 0,
                 Math.ceil(
                   (
-                    next.scheduledAt.getTime() -
+                    next
+                      .scheduledAt
+                      .getTime() -
                     Date.now()
                   ) /
                     60_000
@@ -1479,7 +1941,7 @@ async function processCampaign(
 
         /**
          * ====================================================
-         * SEND ONE
+         * SEND
          * ====================================================
          */
 
@@ -1519,17 +1981,7 @@ async function processCampaign(
           console.log(
             `[FOLLOW-UP][${campaignId}] ▶️ EMAIL interval finished`
           );
-        }
-
-        /**
-         * FOLLOW UP
-         *
-         * Do not wait delayDays here.
-         *
-         * scheduledAt handles it.
-         */
-
-        else if (
+        } else if (
           sent
         ) {
           await logNextFollowUp(
@@ -1540,13 +1992,7 @@ async function processCampaign(
           await sleep(
             1_000
           );
-        }
-
-        /**
-         * Failed.
-         */
-
-        else {
+        } else {
           await sleep(
             5_000
           );
@@ -1566,6 +2012,10 @@ async function processCampaign(
     }
   } finally {
     activeCampaigns.delete(
+      campaignId
+    );
+
+    cleanupCampaignState(
       campaignId
     );
 
@@ -1599,13 +2049,13 @@ async function startFollowUpWorker() {
   while (true) {
     try {
       /**
-       * First activate scheduled campaigns.
+       * Activate scheduled campaigns
        */
 
       await activateScheduledCampaigns();
 
       /**
-       * Then discover RUNNING campaigns.
+       * Find running campaigns
        */
 
       const campaigns =
@@ -1619,10 +2069,6 @@ async function startFollowUpWorker() {
             campaign.id
           )
         ) {
-          /**
-           * Independent worker.
-           */
-
           void processCampaign(
             campaign
           );
@@ -1636,10 +2082,6 @@ async function startFollowUpWorker() {
           : error
       );
     }
-
-    /**
-     * Discovery interval.
-     */
 
     await sleep(
       30_000

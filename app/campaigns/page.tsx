@@ -148,6 +148,10 @@ export default function CampaignPage() {
     const [templates, setTemplates] = useState<{ id: string; name: string; subject: string; body: string }[]>([]);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [activeCampaign, setActiveCampaign] = useState<Campaign | null>(null);
+    const [selectedTemplateIds, setSelectedTemplateIds] = useState<string[]>([]);
+    const [templateDropdownOpen, setTemplateDropdownOpen] = useState(false);
+    const [appliedTemplateInfo, setAppliedTemplateInfo] = useState<string | null>(null);
+    const templateDropdownRef = useRef<HTMLDivElement>(null);
 
     // ---- UI state ----
     const [loading, setLoading] = useState(true);
@@ -445,6 +449,49 @@ export default function CampaignPage() {
         }
     };
 
+    const toggleTemplateId = (id: string) => {
+        setSelectedTemplateIds((prev) =>
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
+    };
+
+    const selectAllTemplates = () => {
+        setSelectedTemplateIds(templates.map((t) => t.id));
+    };
+
+    const clearAllTemplates = () => {
+        setSelectedTemplateIds([]);
+    };
+
+    const applySelectedTemplates = () => {
+        if (selectedTemplateIds.length === 0) return;
+        const firstId = selectedTemplateIds[0];
+        const t = templates.find((x) => x.id === firstId);
+        if (!t) return;
+        applyTemplate(firstId);
+        const count = selectedTemplateIds.length;
+        const label = t.name || t.subject || "Untitled template";
+        setAppliedTemplateInfo(
+            `${count} template${count === 1 ? "" : "s"} selected · ${label} applied`
+        );
+        setTemplateDropdownOpen(false);
+    };
+
+    // Close template dropdown on outside click
+    useEffect(() => {
+        if (!templateDropdownOpen) return;
+        const handleClickOutside = (e: MouseEvent) => {
+            if (
+                templateDropdownRef.current &&
+                !templateDropdownRef.current.contains(e.target as Node)
+            ) {
+                setTemplateDropdownOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [templateDropdownOpen]);
+
     // ---------------------------------------------------------------------------
     // CSV import
     // ---------------------------------------------------------------------------
@@ -561,6 +608,7 @@ export default function CampaignPage() {
             name: campaignName.trim(),
             campaignType: "EMAIL",
             smtpConfigIds: selectedSmtpIds,
+            selectedTemplateIds, // ✅ ADD THIS
             subject: finalSubject,
             body: finalBody,
             greetingEnabled,
@@ -961,18 +1009,80 @@ export default function CampaignPage() {
                                     <h2 className="text-sm font-semibold text-zinc-900">Email Content</h2>
                                 </div>
                                 {templates.length > 0 && (
-                                    <select
-                                        className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs text-zinc-700"
-                                        onChange={(e) => e.target.value && applyTemplate(e.target.value)}
-                                        defaultValue=""
-                                    >
-                                        <option value="">Load template…</option>
-                                        {templates.map((t) => (
-                                            <option key={t.id} value={t.id}>
-                                                {t.subject || t.name || "Untitled template"}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    <div className="relative" ref={templateDropdownRef}>
+                                        <button
+                                            type="button"
+                                            onClick={() => setTemplateDropdownOpen((o) => !o)}
+                                            className="inline-flex items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                                        >
+                                            {selectedTemplateIds.length === 0
+                                                ? "Select templates"
+                                                : selectedTemplateIds.length === 1
+                                                    ? "1 template selected"
+                                                    : `${selectedTemplateIds.length} templates selected`}
+                                            <ChevronDown className="h-3.5 w-3.5 text-zinc-400" />
+                                        </button>
+                                        {templateDropdownOpen && (
+                                            <div className="absolute right-0 z-30 mt-1 w-72 rounded-lg border border-zinc-200 bg-white shadow-lg">
+                                                <div className="flex items-center justify-between border-b border-zinc-100 px-3 py-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={selectAllTemplates}
+                                                        className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                                                    >
+                                                        Select All
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={clearAllTemplates}
+                                                        className="text-xs font-medium text-zinc-500 hover:text-zinc-700"
+                                                    >
+                                                        Clear All
+                                                    </button>
+                                                </div>
+                                                <ul className="max-h-52 overflow-y-auto py-1">
+                                                    {templates.map((t) => {
+                                                        const checked = selectedTemplateIds.includes(t.id);
+                                                        return (
+                                                            <li key={t.id}>
+                                                                <label className="flex cursor-pointer items-start gap-2 px-3 py-2 hover:bg-zinc-50">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={checked}
+                                                                        onChange={() => toggleTemplateId(t.id)}
+                                                                        className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-300 text-blue-600"
+                                                                    />
+                                                                    <span className="min-w-0 flex-1">
+                                                                        <span className="block truncate text-xs font-medium text-zinc-900">
+                                                                            {t.name || "Untitled"}
+                                                                        </span>
+                                                                        <span className="block truncate text-xs text-zinc-500">
+                                                                            {t.subject || "(no subject)"}
+                                                                        </span>
+                                                                    </span>
+                                                                </label>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ul>
+                                                <div className="border-t border-zinc-100 p-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={applySelectedTemplates}
+                                                        disabled={selectedTemplateIds.length === 0}
+                                                        className="w-full rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                                    >
+                                                        Apply Selected
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {appliedTemplateInfo && (
+                                            <p className="mt-1 text-right text-[11px] text-zinc-400">
+                                                {appliedTemplateInfo}
+                                            </p>
+                                        )}
+                                    </div>
                                 )}
                             </div>
                             <div className="space-y-4 p-5">

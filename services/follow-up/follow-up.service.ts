@@ -230,6 +230,7 @@ export async function createCampaign(
   const {
     name,
     smtpConfigIds,
+    selectedTemplateIds,
     campaignType,
     stopOnReply = true,
     intervalValue = 1,
@@ -244,6 +245,8 @@ export async function createCampaign(
     recipientEmailIds,
     steps,
   } = input;
+
+
 
   if (!name?.trim()) {
     throw new Error("Campaign name is required");
@@ -287,14 +290,25 @@ export async function createCampaign(
 
   // Normalize steps
   const normalizedSteps = steps
-    .map((s, idx) => ({
-      stepNumber: s.stepNumber ?? idx + 1,
-      delayDays: Math.max(1, s.delayDays ?? 1),
-      subject: (s.subject || "").trim(),
-      body: s.body || "",
-      enabled: s.enabled !== false,
-    }))
-    .filter((s) => s.subject.length > 0);
+  .map((s, idx) => ({
+    stepNumber: s.stepNumber ?? idx + 1,
+    delayDays: Math.max(1, s.delayDays ?? 1),
+    subject: (s.subject || "").trim(),
+    body: s.body || "",
+    enabled: s.enabled !== false,
+
+    selectedTemplateIds: Array.from(
+      new Set(
+        idx === 0
+          ? [
+              ...(selectedTemplateIds || []),
+              ...(s.selectedTemplateIds || []),
+            ]
+          : (s.selectedTemplateIds || [])
+      )
+    ),
+  }))
+  .filter((s) => s.subject.length > 0);
 
   if (normalizedSteps.length === 0) {
     throw new Error("At least one valid follow-up step with a subject is required");
@@ -315,10 +329,10 @@ export async function createCampaign(
       data: {
         userId,
         smtpConfigs: {
-      connect: uniqueSmtpIds.map((id) => ({
-        id,
-      })),
-    },
+          connect: uniqueSmtpIds.map((id) => ({
+            id,
+          })),
+        },
         name: name.trim(),
         campaignType,
         status: campaignStatus,
@@ -340,14 +354,25 @@ export async function createCampaign(
             subject: s.subject,
             body: s.body,
             enabled: s.enabled,
+            templates:
+              s.selectedTemplateIds.length > 0
+                ? {
+                  connect: s.selectedTemplateIds.map((id) => ({
+                    id,
+                  })),
+                }
+                : undefined,
           })),
         },
       },
       include: {
-        steps: {
-          orderBy: { stepNumber: "asc" },
-        },
-      },
+  steps: {
+    orderBy: { stepNumber: "asc" },
+    include: {
+      templates: true,
+    },
+  },
+},
     });
 
     const enabledSteps = campaign.steps.filter((s) => s.enabled);
@@ -384,21 +409,38 @@ export async function createCampaign(
     }
 
     return tx.followUpCampaign.findUniqueOrThrow({
-      where: { id: campaign.id },
+  where: { id: campaign.id },
+  include: {
+    steps: {
+      orderBy: { stepNumber: "asc" },
       include: {
-        steps: { orderBy: { stepNumber: "asc" } },
-        recipients: {
+        templates: true,
+      },
+    },
+
+    recipients: {
+      include: {
+        email: true,
+        steps: {
           include: {
-            email: true,
-            steps: {
-              include: { step: true },
-              orderBy: { step: { stepNumber: "asc" } },
+            step: {
+              include: {
+                templates: true,
+              },
+            },
+          },
+          orderBy: {
+            step: {
+              stepNumber: "asc",
             },
           },
         },
-        smtpConfigs: true,
       },
-    });
+    },
+
+    smtpConfigs: true,
+  },
+});
   });
 }
 
@@ -410,36 +452,37 @@ export async function listCampaigns(
   userId: string
 ): Promise<CampaignListItem[]> {
   const campaigns = await prisma.followUpCampaign.findMany({
-    where: { userId },
+  where: { userId },
 
-    include: {
-      // ✅ ADD THIS
-      smtpConfigs: true,
+  include: {
+    smtpConfigs: true,
 
-      steps: {
-        orderBy: {
-          stepNumber: "asc",
-        },
+    steps: {
+      orderBy: {
+        stepNumber: "asc",
       },
-
-      recipients: {
-        select: {
-          status: true,
-        },
-      },
-
-      _count: {
-        select: {
-          recipients: true,
-        },
+      include: {
+        templates: true,
       },
     },
 
-    orderBy: {
-      createdAt: "desc",
+    recipients: {
+      select: {
+        status: true,
+      },
     },
-  });
 
+    _count: {
+      select: {
+        recipients: true,
+      },
+    },
+  },
+
+  orderBy: {
+    createdAt: "desc",
+  },
+});
   return campaigns.map((c) => {
     const { recipients, ...rest } = c;
 

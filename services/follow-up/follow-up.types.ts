@@ -18,6 +18,8 @@ export type IntervalUnit =
 export type CreateCampaignInput = {
   name: string;
   smtpConfigId?: string | null;
+  smtpConfigIds?: string[]; // ✅ ADD THIS
+  selectedTemplateIds?: string[]; // ✅ ADD THIS
   campaignType: "EMAIL" | "FOLLOW_UP";
   stopOnReply?: boolean;
   timezone?: string;
