@@ -158,7 +158,7 @@ export default function CampaignPage() {
 
     // ---- Form state ----
     const [campaignName, setCampaignName] = useState("My Follow-Up Campaign");
-    const [selectedSmtpId, setSelectedSmtpId] = useState<string>("");
+    const [selectedSmtpIds, setSelectedSmtpIds] = useState<string[]>([]);
     const [subject, setSubject] = useState("");
     const [body, setBody] = useState("");
     const [greetingEnabled, setGreetingEnabled] = useState(true);
@@ -523,7 +523,8 @@ export default function CampaignPage() {
 
     const validate = (): string | null => {
         if (!campaignName.trim()) return "Campaign name is required";
-        if (!selectedSmtpId) return "Please select an SMTP sender account";
+        if (selectedSmtpIds.length === 0)
+    return "Please select at least one SMTP sender account";
         if (selectedIds.size === 0) return "Select at least one recipient";
         if (!subject.trim() && !steps[0]?.subject?.trim()) return "Subject is required";
         if (!body.trim() && !steps[0]?.body?.trim()) return "Email body is required";
@@ -559,7 +560,7 @@ export default function CampaignPage() {
         return {
             name: campaignName.trim(),
             campaignType: "EMAIL",
-            smtpConfigId: selectedSmtpId,
+            smtpConfigIds: selectedSmtpIds,
             subject: finalSubject,
             body: finalBody,
             greetingEnabled,
@@ -712,7 +713,9 @@ export default function CampaignPage() {
     const progressPct =
         stats.total > 0 ? Math.round(((stats.sent + stats.completed) / stats.total) * 100) : 0;
 
-    const selectedSmtp = smtpAccounts.find((a) => a.id === selectedSmtpId);
+    const selectedSmtps = smtpAccounts.filter((a) =>
+    selectedSmtpIds.includes(a.id)
+);
 
     // ---------------------------------------------------------------------------
     // Render
@@ -907,42 +910,44 @@ export default function CampaignPage() {
                                     </div>
                                 ) : (
                                     <div className="grid gap-3 sm:grid-cols-2">
-                                        {smtpAccounts.map((acc) => {
-                                            const selected = selectedSmtpId === acc.id;
-                                            return (
-                                                <button
-                                                    key={acc.id}
-                                                    type="button"
-                                                    onClick={() => setSelectedSmtpId(acc.id)}
-                                                    className={`rounded-lg border p-4 text-left transition ${selected
-                                                        ? "border-blue-500 bg-blue-50 ring-2 ring-blue-500/20"
-                                                        : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50"
-                                                        }`}
-                                                >
-                                                    <div className="flex items-start justify-between gap-2">
-                                                        <div className="min-w-0">
-                                                            <div className="truncate font-medium text-zinc-900">
-                                                                {acc?.name || "ali"}
-                                                            </div>
-                                                            <div className="mt-0.5 truncate text-sm text-zinc-500">
-                                                                {acc.email}
-                                                            </div>
-                                                            
-                                                        </div>
-                                                        {selected && (
-                                                            <CheckCircle2 className="h-5 w-5 shrink-0 text-blue-600" />
-                                                        )}
-                                                    </div>
-                                                    {/* <div className="mt-2 flex items-center gap-1.5 text-xs">
-                                                        <span
-                                                            className={`inline-block h-1.5 w-1.5 rounded-full ${acc.isActive !== false ? "bg-emerald-500" : "bg-zinc-300"
-                                                                }`}
-                                                        />
-                                                        {acc.isActive !== false ? "Connected" : "Inactive"}
-                                                    </div> */}
-                                                </button>
-                                            );
-                                        })}
+                                       {smtpAccounts.map((acc) => {
+    const selected = selectedSmtpIds.includes(acc.id);
+
+    return (
+        <button
+            key={acc.id}
+            type="button"
+            onClick={() => {
+                setSelectedSmtpIds((prev) =>
+                    prev.includes(acc.id)
+                        ? prev.filter((id) => id !== acc.id)
+                        : [...prev, acc.id]
+                );
+            }}
+            className={`rounded-lg border p-4 text-left transition ${
+                selected
+                    ? "border-blue-500 bg-blue-50 ring-2 ring-blue-500/20"
+                    : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50"
+            }`}
+        >
+            <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                    <div className="truncate font-medium text-zinc-900">
+                        {acc?.name || "ali"}
+                    </div>
+
+                    <div className="mt-0.5 truncate text-sm text-zinc-500">
+                        {acc.email}
+                    </div>
+                </div>
+
+                {selected && (
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-blue-600" />
+                )}
+            </div>
+        </button>
+    );
+})}
                                     </div>
                                 )}
                             </div>
@@ -1243,7 +1248,7 @@ export default function CampaignPage() {
                                 <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm">
                                     <div className="mb-2 text-xs text-zinc-500">
                                         <span className="font-medium text-zinc-700">From:</span>{" "}
-                                        {selectedSmtp?.email || "—"}
+                                        {selectedSmtps.map((smtp) => smtp.email).join(", ") || "—"}
                                     </div>
                                     <div className="mb-2 text-xs text-zinc-500">
                                         <span className="font-medium text-zinc-700">To:</span>{" "}
@@ -1281,7 +1286,7 @@ export default function CampaignPage() {
                                 <div className="flex justify-between">
                                     <dt className="text-zinc-500">Sender</dt>
                                     <dd className="truncate font-medium text-zinc-900">
-                                        {selectedSmtp?.email || "—"}
+                                        {selectedSmtps.map((smtp) => smtp.email).join(", ") || "—"}
                                     </dd>
                                 </div>
                                 <div className="flex justify-between">
