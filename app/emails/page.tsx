@@ -9,9 +9,10 @@ interface Contact {
   phone: string;
   website: string;
   category: string;
+  company: string;
 }
 
-type CsvMapping = 'ignore' | 'name' | 'email' | 'phone' | 'website' | 'category';
+type CsvMapping = 'ignore' | 'name' | 'email' | 'phone' | 'website' | 'category' | 'company';
 
 interface CsvColumn {
   index: number;
@@ -37,12 +38,12 @@ const MAPPING_OPTIONS: { value: CsvMapping; label: string; required?: boolean }[
   { value: 'email', label: 'Email *', required: true },
   { value: 'phone', label: 'Phone' },
   { value: 'website', label: 'Website' },
+  { value: 'company', label: 'Company' },
   { value: 'category', label: 'Category' },
 ];
 
 // ---------- Robust CSV Parser (handles quotes, commas, escapes, BOM, CRLF) ----------
 function parseCSV(text: string): { headers: string[]; rows: string[][] } {
-  // Strip BOM
   if (text.charCodeAt(0) === 0xfeff) {
     text = text.slice(1);
   }
@@ -60,12 +61,10 @@ function parseCSV(text: string): { headers: string[]; rows: string[][] } {
     if (inQuotes) {
       if (char === '"') {
         if (next === '"') {
-          // Escaped quote
           currentField += '"';
           i += 2;
           continue;
         } else {
-          // End of quoted field
           inQuotes = false;
           i++;
           continue;
@@ -77,7 +76,6 @@ function parseCSV(text: string): { headers: string[]; rows: string[][] } {
       }
     }
 
-    // Not in quotes
     if (char === '"') {
       inQuotes = true;
       i++;
@@ -92,7 +90,6 @@ function parseCSV(text: string): { headers: string[]; rows: string[][] } {
     }
 
     if (char === '\r') {
-      // Handle \r\n or lone \r
       currentRow.push(currentField);
       currentField = '';
       rows.push(currentRow);
@@ -115,13 +112,11 @@ function parseCSV(text: string): { headers: string[]; rows: string[][] } {
     i++;
   }
 
-  // Last field / row
   if (currentField !== '' || currentRow.length > 0) {
     currentRow.push(currentField);
     rows.push(currentRow);
   }
 
-  // Remove completely empty trailing rows
   while (rows.length > 0 && rows[rows.length - 1].every(c => c.trim() === '')) {
     rows.pop();
   }
@@ -133,7 +128,6 @@ function parseCSV(text: string): { headers: string[]; rows: string[][] } {
   const headers = rows[0].map(h => h.trim());
   const dataRows = rows.slice(1).filter(r => r.some(c => c.trim() !== ''));
 
-  // Normalize row lengths to header count
   const normalizedRows = dataRows.map(row => {
     const r = [...row];
     while (r.length < headers.length) r.push('');
@@ -176,6 +170,12 @@ const WEBSITE_ALIASES = [
   'web', 'homepage', 'site'
 ];
 
+const COMPANY_ALIASES = [
+  'company', 'company name', 'companyname', 'organization', 'organisation',
+  'org', 'business', 'business name', 'firm', 'employer', 'workplace',
+  'company_name', 'org name', 'organization name'
+];
+
 const CATEGORY_ALIASES = [
   'category', 'type', 'industry', 'business type', 'business type',
   'sector', 'niche', 'vertical', 'segment'
@@ -206,9 +206,9 @@ function suggestMapping(header: string, samples: string[]): CsvMapping {
   if (EMAIL_ALIASES.some(a => norm === a || norm.includes(a))) return 'email';
   if (PHONE_ALIASES.some(a => norm === a || norm.includes(a))) return 'phone';
   if (WEBSITE_ALIASES.some(a => norm === a || norm.includes(a))) return 'website';
+  if (COMPANY_ALIASES.some(a => norm === a || norm.includes(a))) return 'company';
   if (CATEGORY_ALIASES.some(a => norm === a || norm.includes(a))) return 'category';
 
-  // Value-based detection when header is ambiguous
   const nonEmpty = samples.filter(s => s && s.trim());
   if (nonEmpty.length === 0) return 'ignore';
 
@@ -273,7 +273,10 @@ export default function ContactManager() {
     try {
       const res = await fetch(`/api/email?userId=${userId}&listId=${listId}`);
       const json = await res.json();
-      const data = json.data || [];
+      const data = (json.data || []).map((c: any) => ({
+        ...c,
+        company: c.company ?? '',
+      }));
       setContacts([...data]);
       setOriginalContacts([...data]);
     } catch (e) {
@@ -290,7 +293,8 @@ export default function ContactManager() {
     return contacts.filter(c =>
       (c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (c.phone && c.phone.includes(searchTerm))) &&
+        (c.phone && c.phone.includes(searchTerm)) ||
+        (c.company && c.company.toLowerCase().includes(searchTerm.toLowerCase()))) &&
       (!categoryFilter || c.category === categoryFilter)
     );
   }, [contacts, searchTerm, categoryFilter]);
@@ -319,7 +323,7 @@ export default function ContactManager() {
   const addBulkRows = () => {
     const newRows: Contact[] = Array.from({ length: bulkRows }, () => ({
       id: `temp-${Date.now()}-${Math.random()}`,
-      name: '', email: '', phone: '', website: '', category: ''
+      name: '', email: '', phone: '', website: '', category: '', company: ''
     }));
     setContacts(prev => [...prev, ...newRows]);
     showToast(`${bulkRows} rows created`);
@@ -332,17 +336,14 @@ export default function ContactManager() {
     let from = Math.max(1, Math.floor(Number(selectFrom)) || 1);
     let to = Math.max(1, Math.floor(Number(selectTo)) || 1);
 
-    // Swap if From > To
     if (from > to) {
       [from, to] = [to, from];
     }
 
-    // Cap to available filtered rows
     const max = filteredContacts.length;
     from = Math.min(from, max);
     to = Math.min(to, max);
 
-    // 1-based → 0-based slice
     const idsToSelect = filteredContacts
       .slice(from - 1, to)
       .map(c => c.id);
@@ -360,106 +361,62 @@ export default function ContactManager() {
     console.clear();
     console.log("========== SAVE ALL ==========");
 
-    console.log("Total Contacts:", contacts);
-    console.log("Original Contacts:", originalContacts);
-
     const valid = contacts.filter(c =>
-      c.name?.trim() &&
       c.email?.trim() &&
       /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)
     );
 
-    console.log("Valid Contacts:", valid);
-    console.log("Valid Count:", valid.length);
-
     const newRows = valid
       .filter(c => c.id.startsWith("temp-"))
       .map(c => {
-        const p = { ...c };
-        delete (p as any).id;
-        return p;
+        const { id, ...rest } = c;
+        return rest;
       });
-
-    console.log("New Rows:", newRows);
-    console.log("New Rows Count:", newRows.length);
 
     const updatedRows = valid
       .filter(c => !c.id.startsWith("temp-"))
       .filter(c => {
         const orig = originalContacts.find(o => o.id === c.id);
+        if (!orig) return false;
 
-        if (!orig) {
-          console.log("Original not found:", c.id);
-          return false;
-        }
-
-        const changed =
+        return (
           orig.name !== c.name ||
           orig.email !== c.email ||
           orig.phone !== c.phone ||
           orig.website !== c.website ||
-          orig.category !== c.category;
-
-        if (changed) {
-          console.log("Changed:", c.id, {
-            before: orig,
-            after: c,
-          });
-        }
-
-        return changed;
+          orig.category !== c.category ||
+          orig.company !== c.company
+        );
       });
-
-    console.log("Updated Rows:", updatedRows);
-    console.log("Updated Rows Count:", updatedRows.length);
 
     try {
       if (newRows.length > 0) {
-        console.log("Calling POST API...");
-
         const res = await fetch("/api/email", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userId,
             listId,
             contacts: newRows,
           }),
         });
-
         console.log("POST Status:", res.status);
-        console.log("POST Response:", await res.text());
-      } else {
-        console.log("POST skipped");
       }
 
       if (updatedRows.length > 0) {
-        console.log("Calling PUT API...");
-
         const res = await fetch("/api/email", {
           method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userId,
             listId,
             contacts: updatedRows,
           }),
         });
-
         console.log("PUT Status:", res.status);
-        console.log("PUT Response:", await res.text());
-      } else {
-        console.log("PUT skipped");
       }
 
-      console.log("Refreshing contacts...");
       await fetchContacts();
-
-      console.log("Done");
       showToast("Contacts saved");
     } catch (err) {
       console.error("SAVE ERROR:", err);
@@ -535,7 +492,6 @@ export default function ContactManager() {
         return;
       }
 
-      // Build columns with samples + auto suggestions
       const columns: CsvColumn[] = headers.map((h, idx) => {
         const samples = rows
           .slice(0, 8)
@@ -551,7 +507,7 @@ export default function ContactManager() {
         };
       });
 
-      // Enforce unique destination mappings (keep first occurrence)
+      // Enforce unique destination mappings
       const used = new Set<CsvMapping>();
       for (const col of columns) {
         if (col.mapping !== 'ignore') {
@@ -577,10 +533,7 @@ export default function ContactManager() {
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      processCsvFile(file);
-    }
-    // Reset so the same file can be re-selected later
+    if (file) processCsvFile(file);
     e.target.value = '';
   };
 
@@ -588,16 +541,13 @@ export default function ContactManager() {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) {
-      processCsvFile(file);
-    }
+    if (file) processCsvFile(file);
   };
 
   const updateColumnMapping = (colIndex: number, newMapping: CsvMapping) => {
     setCsvColumns(prev => {
       const next = prev.map(c => ({ ...c }));
 
-      // If assigning a real field, clear any other column that already uses it
       if (newMapping !== 'ignore') {
         for (const c of next) {
           if (c.index !== colIndex && c.mapping === newMapping) {
@@ -613,7 +563,6 @@ export default function ContactManager() {
     });
   };
 
-  // Build transformed contacts from current mappings
   const buildImportData = useCallback(() => {
     const mappingByIndex: Record<number, CsvMapping> = {};
     csvColumns.forEach(c => {
@@ -621,7 +570,7 @@ export default function ContactManager() {
     });
 
     const result: {
-      contact: { name: string; email: string; phone: string; website: string; category: string };
+      contact: { name: string; email: string; phone: string; website: string; category: string; company: string };
       rowIndex: number;
       valid: boolean;
       reason?: string;
@@ -636,6 +585,7 @@ export default function ContactManager() {
         phone: '',
         website: '',
         category: '',
+        company: '',
       };
 
       for (let i = 0; i < row.length; i++) {
@@ -647,9 +597,9 @@ export default function ContactManager() {
         else if (map === 'phone') contact.phone = val;
         else if (map === 'website') contact.website = val;
         else if (map === 'category') contact.category = val;
+        else if (map === 'company') contact.company = val;
       }
 
-      // Validation
       if (!contact.email) {
         result.push({ contact, rowIndex: rowIdx + 2, valid: false, reason: 'Missing email' });
         return;
@@ -735,8 +685,8 @@ export default function ContactManager() {
       headers = ['Name', 'Email'];
       rows = toExport.map(c => `"${c.name}","${c.email}"`);
     } else {
-      headers = ['Name', 'Email', 'Phone', 'Website', 'Category'];
-      rows = toExport.map(c => `"${c.name}","${c.email}","${c.phone}","${c.website}","${c.category}"`);
+      headers = ['Name', 'Email', 'Phone', 'Website', 'Company', 'Category'];
+      rows = toExport.map(c => `"${c.name}","${c.email}","${c.phone}","${c.website}","${c.company}","${c.category}"`);
     }
     const csv = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -763,7 +713,6 @@ export default function ContactManager() {
     c.name.toLowerCase().includes(categorySearch.toLowerCase())
   );
 
-  // Select-all checkbox helpers
   const allFilteredSelected =
     filteredContacts.length > 0 &&
     filteredContacts.every(c => selected.has(c.id));
@@ -791,7 +740,6 @@ export default function ContactManager() {
               />
             </label>
 
-            {/* Export Dropdown */}
             <div className="relative group">
               <button className="flex items-center gap-2 px-5 py-2.5 border border-zinc-200 hover:bg-white rounded-2xl text-sm font-medium transition-all">
                 <Download size={16} /> Export <ChevronDown size={14} />
@@ -813,7 +761,6 @@ export default function ContactManager() {
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-6 bg-white border border-zinc-200 rounded-3xl p-2 shadow-sm">
           <div className="flex items-center gap-3 flex-wrap">
-            {/* Search */}
             <div className="relative max-w-md min-w-[200px]">
               <Search className="absolute left-4 top-3.5 text-zinc-400" size={18} />
               <input
@@ -825,7 +772,6 @@ export default function ContactManager() {
               />
             </div>
 
-            {/* Category Filter */}
             <div className="relative w-56">
               <button
                 onClick={() => setCategoryOpen(!categoryOpen)}
@@ -873,7 +819,6 @@ export default function ContactManager() {
             </div>
           </div>
 
-          {/* Bulk Controls */}
           <div className="flex items-center gap-2 flex-wrap">
             {/* Dynamic From → To selection */}
             <div className="flex items-center gap-1.5 bg-zinc-50 border border-zinc-200 rounded-2xl px-2.5 py-1">
@@ -902,7 +847,6 @@ export default function ContactManager() {
               </button>
             </div>
 
-            {/* Add Rows */}
             <div className="flex items-center gap-2 bg-zinc-50 border border-zinc-200 rounded-2xl px-3 py-1">
               <input
                 type="number"
@@ -927,7 +871,7 @@ export default function ContactManager() {
           </div>
         </div>
 
-        {/* Table Container */}
+        {/* Table */}
         <div className="bg-white border border-zinc-200 rounded-3xl overflow-hidden shadow-sm">
           <table className="w-full">
             <thead className="sticky top-0 bg-white z-10 border-b border-zinc-200">
@@ -962,6 +906,7 @@ export default function ContactManager() {
                 <th className="p-4 text-left text-xs font-medium text-zinc-500">EMAIL</th>
                 <th className="p-4 text-left text-xs font-medium text-zinc-500">PHONE</th>
                 <th className="p-4 text-left text-xs font-medium text-zinc-500">WEBSITE</th>
+                <th className="p-4 text-left text-xs font-medium text-zinc-500">COMPANY</th>
                 <th className="p-4 text-left text-xs font-medium text-zinc-500">CATEGORY</th>
                 <th className="w-20 p-4"></th>
               </tr>
@@ -970,12 +915,14 @@ export default function ContactManager() {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    {Array.from({ length: 8 }).map((_, j) => <td key={j} className="p-5"><div className="h-4 bg-zinc-100 rounded w-3/4" /></td>)}
+                    {Array.from({ length: 9 }).map((_, j) => (
+                      <td key={j} className="p-5"><div className="h-4 bg-zinc-100 rounded w-3/4" /></td>
+                    ))}
                   </tr>
                 ))
               ) : filteredContacts.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-20 text-center">
+                  <td colSpan={9} className="p-20 text-center">
                     <div className="mx-auto w-16 h-16 bg-zinc-100 rounded-full flex items-center justify-center mb-4">
                       <Search size={28} className="text-zinc-400" />
                     </div>
@@ -990,7 +937,11 @@ export default function ContactManager() {
                       <input
                         type="checkbox"
                         checked={selected.has(contact.id)}
-                        onChange={() => setSelected(prev => { const n = new Set(prev); n.has(contact.id) ? n.delete(contact.id) : n.add(contact.id); return n; })}
+                        onChange={() => setSelected(prev => {
+                          const n = new Set(prev);
+                          n.has(contact.id) ? n.delete(contact.id) : n.add(contact.id);
+                          return n;
+                        })}
                         className="w-4 h-4 accent-blue-600"
                       />
                     </td>
@@ -1032,6 +983,15 @@ export default function ContactManager() {
                       )}
                     </td>
 
+                    {/* Company */}
+                    <td className="p-4">
+                      {editing?.id === contact.id && editing.field === 'company' ? (
+                        <input type="text" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={commitEdit} onKeyDown={e => e.key === 'Enter' && commitEdit()} autoFocus className="w-full px-3 py-2.5 border border-blue-500 rounded-xl text-sm focus:outline-none" />
+                      ) : (
+                        <div onClick={() => startEditing(contact.id, 'company', contact.company)} className="cursor-text min-h-[44px] flex items-center py-1 px-2 rounded-xl hover:bg-white transition">{contact.company || <span className="text-zinc-400 italic">Company name</span>}</div>
+                      )}
+                    </td>
+
                     {/* Category */}
                     <td className="p-4">
                       {editing?.id === contact.id && editing.field === 'category' ? (
@@ -1064,7 +1024,6 @@ export default function ContactManager() {
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={resetImportState} />
 
           <div className="relative bg-white rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
-            {/* Modal Header */}
             <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-200">
               <div>
                 <h2 className="text-xl font-semibold tracking-tight">Import Contacts</h2>
@@ -1072,15 +1031,11 @@ export default function ContactManager() {
                   Map your CSV columns to contact fields before importing.
                 </p>
               </div>
-              <button
-                onClick={resetImportState}
-                className="p-2 hover:bg-zinc-100 rounded-xl transition"
-              >
+              <button onClick={resetImportState} className="p-2 hover:bg-zinc-100 rounded-xl transition">
                 <X size={20} />
               </button>
             </div>
 
-            {/* Progress Steps */}
             <div className="px-6 py-4 border-b border-zinc-100 bg-zinc-50/80">
               <div className="flex items-center gap-3 text-sm">
                 <div className={`flex items-center gap-2 ${importStep === 'mapping' ? 'text-blue-600 font-semibold' : 'text-zinc-400'}`}>
@@ -1095,7 +1050,6 @@ export default function ContactManager() {
               </div>
             </div>
 
-            {/* File info bar */}
             {csvFile && (
               <div className="px-6 py-3 bg-zinc-50 border-b border-zinc-100 flex items-center justify-between text-sm">
                 <div className="flex items-center gap-3">
@@ -1118,11 +1072,9 @@ export default function ContactManager() {
               </div>
             )}
 
-            {/* Body */}
             <div className="flex-1 overflow-y-auto px-6 py-5">
               {importStep === 'mapping' && (
                 <>
-                  {/* Drop zone (optional extra) */}
                   {!csvFile && (
                     <div
                       onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -1192,7 +1144,6 @@ export default function ContactManager() {
 
               {importStep === 'preview' && (
                 <div className="space-y-5">
-                  {/* Stats */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="bg-zinc-50 rounded-2xl px-4 py-3 border border-zinc-200">
                       <div className="text-2xl font-semibold tabular-nums">{importStats.total}</div>
@@ -1212,7 +1163,6 @@ export default function ContactManager() {
                     </div>
                   </div>
 
-                  {/* Errors expandable */}
                   {importStats.errors.length > 0 && (
                     <details className="bg-zinc-50 border border-zinc-200 rounded-2xl">
                       <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-zinc-700 flex items-center gap-2">
@@ -1230,7 +1180,6 @@ export default function ContactManager() {
                     </details>
                   )}
 
-                  {/* Preview table */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <h3 className="text-sm font-medium text-zinc-700">
@@ -1248,13 +1197,14 @@ export default function ContactManager() {
                             <th className="px-4 py-2.5 text-left font-medium text-zinc-500">Email</th>
                             <th className="px-4 py-2.5 text-left font-medium text-zinc-500">Phone</th>
                             <th className="px-4 py-2.5 text-left font-medium text-zinc-500">Website</th>
+                            <th className="px-4 py-2.5 text-left font-medium text-zinc-500">Company</th>
                             <th className="px-4 py-2.5 text-left font-medium text-zinc-500">Category</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-100">
                           {importStats.preview.length === 0 ? (
                             <tr>
-                              <td colSpan={5} className="px-4 py-8 text-center text-zinc-400">
+                              <td colSpan={6} className="px-4 py-8 text-center text-zinc-400">
                                 No valid contacts to preview
                               </td>
                             </tr>
@@ -1265,6 +1215,7 @@ export default function ContactManager() {
                                 <td className="px-4 py-2.5 font-mono text-xs">{c.email}</td>
                                 <td className="px-4 py-2.5">{c.phone || <span className="text-zinc-300">—</span>}</td>
                                 <td className="px-4 py-2.5">{c.website || <span className="text-zinc-300">—</span>}</td>
+                                <td className="px-4 py-2.5">{c.company || <span className="text-zinc-300">—</span>}</td>
                                 <td className="px-4 py-2.5">{c.category || <span className="text-zinc-300">—</span>}</td>
                               </tr>
                             ))
@@ -1284,7 +1235,6 @@ export default function ContactManager() {
               )}
             </div>
 
-            {/* Footer */}
             <div className="px-6 py-4 border-t border-zinc-200 bg-zinc-50/50 flex items-center justify-between gap-3">
               <button
                 onClick={resetImportState}

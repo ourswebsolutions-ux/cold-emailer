@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
         phone: item.phone,
         website: item.website,
         category: item.category,
+        company: item.company,
         status: EmailStatus.PENDING,
       }));
 
