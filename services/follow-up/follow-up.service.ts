@@ -229,7 +229,7 @@ export async function createCampaign(
 ) {
   const {
     name,
-    smtpConfigId,
+    smtpConfigIds,
     campaignType,
     stopOnReply = true,
     intervalValue = 1,
@@ -256,13 +256,24 @@ export async function createCampaign(
   }
 
   // Validate SMTP ownership if provided
-  if (smtpConfigId) {
-    const smtp = await prisma.sMTPConfig.findFirst({
-      where: { id: smtpConfigId, userId },
-    });
-    if (!smtp) {
-      throw new Error("SMTP configuration not found");
-    }
+  // Validate SMTP ownership
+  if (!Array.isArray(smtpConfigIds) || smtpConfigIds.length === 0) {
+    throw new Error("At least one SMTP configuration is required");
+  }
+
+  const uniqueSmtpIds = Array.from(new Set(smtpConfigIds));
+
+  const smtpAccounts = await prisma.sMTPConfig.findMany({
+    where: {
+      id: { in: uniqueSmtpIds },
+      userId,
+    },
+  });
+
+  if (smtpAccounts.length !== uniqueSmtpIds.length) {
+    throw new Error(
+      "One or more SMTP configurations were not found or do not belong to you"
+    );
   }
 
   // Validate emails belong to user and are unique
@@ -303,21 +314,25 @@ export async function createCampaign(
     const campaign = await tx.followUpCampaign.create({
       data: {
         userId,
-        smtpConfigId: smtpConfigId || null,
+        smtpConfigs: {
+      connect: uniqueSmtpIds.map((id) => ({
+        id,
+      })),
+    },
         name: name.trim(),
         campaignType,
         status: campaignStatus,
         stopOnReply,
         intervalValue,
-    intervalUnit,
-    dailyLimit,
-    greetingEnabled,
-    spinTextEnabled,
+        intervalUnit,
+        dailyLimit,
+        greetingEnabled,
+        spinTextEnabled,
         timezone,
         sendingStart,
         sendingEnd,
         scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
-        
+
         steps: {
           create: normalizedSteps.map((s) => ({
             stepNumber: s.stepNumber,
@@ -381,7 +396,7 @@ export async function createCampaign(
             },
           },
         },
-        smtpConfig: true,
+        smtpConfigs: true,
       },
     });
   });
@@ -396,20 +411,38 @@ export async function listCampaigns(
 ): Promise<CampaignListItem[]> {
   const campaigns = await prisma.followUpCampaign.findMany({
     where: { userId },
+
     include: {
-      steps: { orderBy: { stepNumber: "asc" } },
-      recipients: {
-        select: { status: true },
+      // ✅ ADD THIS
+      smtpConfigs: true,
+
+      steps: {
+        orderBy: {
+          stepNumber: "asc",
+        },
       },
+
+      recipients: {
+        select: {
+          status: true,
+        },
+      },
+
       _count: {
-        select: { recipients: true },
+        select: {
+          recipients: true,
+        },
       },
     },
-    orderBy: { createdAt: "desc" },
+
+    orderBy: {
+      createdAt: "desc",
+    },
   });
 
   return campaigns.map((c) => {
     const { recipients, ...rest } = c;
+
     return {
       ...rest,
       stats: computeCampaignStats(recipients),
@@ -439,7 +472,7 @@ export async function getCampaignDetail(
         },
         orderBy: { createdAt: "asc" },
       },
-      smtpConfig: true,
+      smtpConfigs: true,
     },
   });
 
@@ -459,52 +492,136 @@ export async function updateCampaign(
   input: UpdateCampaignInput
 ) {
   const existing = await getOwnedCampaign(prisma, campaignId, userId);
+
   if (!existing) {
     throw new Error("Campaign not found");
   }
 
-  if (existing.status === "COMPLETED" || existing.status === "STOPPED") {
-    // Allow only name changes on terminal campaigns
+  // Completed / stopped campaigns:
+  // only allow normal editable fields, not status/SMTP/schedule changes
+  if (
+    existing.status === "COMPLETED" ||
+    existing.status === "STOPPED"
+  ) {
     if (
-      input.status ||
-      input.smtpConfigId !== undefined ||
+      input.status !== undefined ||
+      input.smtpConfigIds !== undefined ||
       input.scheduledAt !== undefined
     ) {
-      throw new Error("Cannot modify a completed or stopped campaign");
+      throw new Error(
+        "Cannot modify a completed or stopped campaign"
+      );
     }
   }
 
-  if (input.smtpConfigId) {
-    const smtp = await prisma.sMTPConfig.findFirst({
-      where: { id: input.smtpConfigId, userId },
+  /*
+   * ============================================
+   * VALIDATE MULTIPLE SMTP CONFIGURATIONS
+   * ============================================
+   */
+  let uniqueSmtpIds: string[] | undefined;
+
+  if (input.smtpConfigIds !== undefined) {
+    uniqueSmtpIds = Array.from(
+      new Set(input.smtpConfigIds)
+    );
+
+    if (uniqueSmtpIds.length === 0) {
+      throw new Error(
+        "At least one SMTP configuration is required"
+      );
+    }
+
+    const smtpAccounts = await prisma.sMTPConfig.findMany({
+      where: {
+        id: {
+          in: uniqueSmtpIds,
+        },
+        userId,
+      },
     });
-    if (!smtp) throw new Error("SMTP configuration not found");
+
+    if (smtpAccounts.length !== uniqueSmtpIds.length) {
+      throw new Error(
+        "One or more SMTP configurations were not found or do not belong to you"
+      );
+    }
   }
+
+  /*
+   * ============================================
+   * BUILD UPDATE DATA
+   * ============================================
+   */
 
   const data: Prisma.FollowUpCampaignUpdateInput = {};
-  if (input.name !== undefined) data.name = input.name.trim();
-  if (input.smtpConfigId !== undefined) {
-    data.smtpConfig = input.smtpConfigId
-      ? { connect: { id: input.smtpConfigId } }
-      : { disconnect: true };
+
+  if (input.name !== undefined) {
+    data.name = input.name.trim();
   }
-  if (input.stopOnReply !== undefined) data.stopOnReply = input.stopOnReply;
-  if (input.timezone !== undefined) data.timezone = input.timezone;
-  if (input.sendingStart !== undefined) data.sendingStart = input.sendingStart;
-  if (input.sendingEnd !== undefined) data.sendingEnd = input.sendingEnd;
+
+  /*
+   * MULTI SMTP
+   */
+  if (uniqueSmtpIds !== undefined) {
+    data.smtpConfigs = {
+      set: uniqueSmtpIds.map((id) => ({
+        id,
+      })),
+    };
+  }
+
+  if (input.stopOnReply !== undefined) {
+    data.stopOnReply = input.stopOnReply;
+  }
+
+  if (input.timezone !== undefined) {
+    data.timezone = input.timezone;
+  }
+
+  if (input.sendingStart !== undefined) {
+    data.sendingStart = input.sendingStart;
+  }
+
+  if (input.sendingEnd !== undefined) {
+    data.sendingEnd = input.sendingEnd;
+  }
+
   if (input.scheduledAt !== undefined) {
-    data.scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
+    data.scheduledAt = input.scheduledAt
+      ? new Date(input.scheduledAt)
+      : null;
   }
-  if (input.status !== undefined) data.status = input.status;
+
+  if (input.status !== undefined) {
+    data.status = input.status;
+  }
+
+  /*
+   * ============================================
+   * UPDATE CAMPAIGN
+   * ============================================
+   */
 
   return prisma.followUpCampaign.update({
-    where: { id: campaignId },
+    where: {
+      id: campaignId,
+    },
     data,
     include: {
-      steps: { orderBy: { stepNumber: "asc" } },
-      recipients: {
-        include: { email: true },
+      steps: {
+        orderBy: {
+          stepNumber: "asc",
+        },
       },
+
+      recipients: {
+        include: {
+          email: true,
+        },
+      },
+
+      smtpConfigs: true,
     },
   });
 }
