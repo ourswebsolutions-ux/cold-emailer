@@ -17,6 +17,14 @@ import type {
 type PrismaTx = Prisma.TransactionClient | PrismaClient;
 
 /**
+ * Batch size for large recipient operations.
+ *
+ * This prevents thousands of individual Prisma queries from
+ * running inside a single interactive transaction.
+ */
+const RECIPIENT_BATCH_SIZE = 500;
+
+/**
  * Replace template variables in subject/body.
  */
 export function replaceVariables(
@@ -24,6 +32,7 @@ export function replaceVariables(
   ctx: VariableContext
 ): string {
   const firstName = ctx.name?.split(" ")[0] || ctx.name || "";
+
   return text
     .replace(/\{\{name\}\}/gi, firstName)
     .replace(/\{\{full_name\}\}/gi, ctx.name || "")
@@ -37,6 +46,7 @@ export function replaceVariables(
  */
 function parseTime(time: string): { hours: number; minutes: number } {
   const [h, m] = time.split(":").map((v) => parseInt(v, 10));
+
   return {
     hours: Number.isFinite(h) ? h : 9,
     minutes: Number.isFinite(m) ? m : 0,
@@ -55,7 +65,7 @@ export function getZonedParts(
   day: number;
   hour: number;
   minute: number;
-  weekday: number; // 0=Sun ... 6=Sat
+  weekday: number;
 } {
   try {
     const dtf = new Intl.DateTimeFormat("en-US", {
@@ -68,9 +78,12 @@ export function getZonedParts(
       hour12: false,
       weekday: "short",
     });
+
     const parts = dtf.formatToParts(date);
+
     const get = (type: string) =>
       parts.find((p) => p.type === type)?.value ?? "0";
+
     const weekdayMap: Record<string, number> = {
       Sun: 0,
       Mon: 1,
@@ -80,6 +93,7 @@ export function getZonedParts(
       Fri: 5,
       Sat: 6,
     };
+
     return {
       year: parseInt(get("year"), 10),
       month: parseInt(get("month"), 10),
@@ -89,7 +103,6 @@ export function getZonedParts(
       weekday: weekdayMap[get("weekday")] ?? 0,
     };
   } catch {
-    // Fallback to UTC
     return {
       year: date.getUTCFullYear(),
       month: date.getUTCMonth() + 1,
@@ -112,6 +125,7 @@ export function isWithinSendingWindow(
   sendingEnd: string
 ): boolean {
   const parts = getZonedParts(now, timezone);
+
   const start = parseTime(sendingStart);
   const end = parseTime(sendingEnd);
 
@@ -120,26 +134,31 @@ export function isWithinSendingWindow(
   const endMinutes = end.hours * 60 + end.minutes;
 
   if (startMinutes <= endMinutes) {
-    return currentMinutes >= startMinutes && currentMinutes < endMinutes;
+    return (
+      currentMinutes >= startMinutes &&
+      currentMinutes < endMinutes
+    );
   }
-  // Overnight window (e.g. 22:00 – 06:00)
-  return currentMinutes >= startMinutes || currentMinutes < endMinutes;
+
+  return (
+    currentMinutes >= startMinutes ||
+    currentMinutes < endMinutes
+  );
 }
 
 /**
- * Add `days` calendar days to a date, preserving time-of-day roughly.
- * Uses UTC for arithmetic to avoid DST surprises in storage.
+ * Add `days` calendar days to a date.
  */
 export function addDays(date: Date, days: number): Date {
   const d = new Date(date.getTime());
+
   d.setUTCDate(d.getUTCDate() + days);
+
   return d;
 }
 
 /**
  * Compute the first scheduledAt for a recipient's first enabled step.
- * If campaign has scheduledAt in the future, use that as base.
- * Otherwise use now + delayDays of the first step.
  */
 export function computeFirstScheduledAt(
   base: Date,
@@ -155,6 +174,7 @@ export function computeCampaignStats(
   recipients: Array<{ status: FollowUpRecipientStatus }>
 ): CampaignStats {
   const total = recipients.length;
+
   let pending = 0;
   let running = 0;
   let replied = 0;
@@ -167,30 +187,50 @@ export function computeCampaignStats(
       case "PENDING":
         pending++;
         break;
+
       case "RUNNING":
         running++;
         break;
+
       case "REPLIED":
         replied++;
         break;
+
       case "COMPLETED":
         completed++;
         break;
+
       case "FAILED":
         failed++;
         break;
+
       case "STOPPED":
         stopped++;
         break;
     }
   }
 
-  // "sent" approximates recipients that have progressed past pure pending
-  const sent = running + replied + completed + failed;
+  const sent =
+    running +
+    replied +
+    completed +
+    failed;
+
   const remaining = pending + running;
-  const done = replied + completed + failed + stopped;
+
+  const done =
+    replied +
+    completed +
+    failed +
+    stopped;
+
   const progress =
-    total === 0 ? 0 : Math.min(100, Math.round((done / total) * 100));
+    total === 0
+      ? 0
+      : Math.min(
+          100,
+          Math.round((done / total) * 100)
+        );
 
   return {
     total,
@@ -215,12 +255,20 @@ export async function getOwnedCampaign(
   userId: string
 ) {
   return prisma.followUpCampaign.findFirst({
-    where: { id: campaignId, userId },
+    where: {
+      id: campaignId,
+      userId,
+    },
   });
 }
 
 /**
- * Create a full campaign with steps, recipients, and recipient-steps.
+ * Create a full campaign with steps, recipients,
+ * and recipient-steps.
+ *
+ * IMPORTANT:
+ * Large recipient operations are processed in batches
+ * instead of one giant interactive transaction.
  */
 export async function createCampaign(
   prisma: PrismaClient,
@@ -246,72 +294,126 @@ export async function createCampaign(
     steps,
   } = input;
 
-
-
   if (!name?.trim()) {
     throw new Error("Campaign name is required");
   }
+
   if (!Array.isArray(steps) || steps.length === 0) {
-    throw new Error("At least one follow-up step is required");
-  }
-  if (!Array.isArray(recipientEmailIds) || recipientEmailIds.length === 0) {
-    throw new Error("At least one recipient is required");
-  }
-
-  // Validate SMTP ownership if provided
-  // Validate SMTP ownership
-  if (!Array.isArray(smtpConfigIds) || smtpConfigIds.length === 0) {
-    throw new Error("At least one SMTP configuration is required");
+    throw new Error(
+      "At least one follow-up step is required"
+    );
   }
 
-  const uniqueSmtpIds = Array.from(new Set(smtpConfigIds));
+  if (
+    !Array.isArray(recipientEmailIds) ||
+    recipientEmailIds.length === 0
+  ) {
+    throw new Error(
+      "At least one recipient is required"
+    );
+  }
 
-  const smtpAccounts = await prisma.sMTPConfig.findMany({
-    where: {
-      id: { in: uniqueSmtpIds },
-      userId,
-    },
-  });
+  if (
+    !Array.isArray(smtpConfigIds) ||
+    smtpConfigIds.length === 0
+  ) {
+    throw new Error(
+      "At least one SMTP configuration is required"
+    );
+  }
 
-  if (smtpAccounts.length !== uniqueSmtpIds.length) {
+  const uniqueSmtpIds = Array.from(
+    new Set(smtpConfigIds)
+  );
+
+  const smtpAccounts =
+    await prisma.sMTPConfig.findMany({
+      where: {
+        id: {
+          in: uniqueSmtpIds,
+        },
+        userId,
+      },
+    });
+
+  if (
+    smtpAccounts.length !== uniqueSmtpIds.length
+  ) {
     throw new Error(
       "One or more SMTP configurations were not found or do not belong to you"
     );
   }
 
-  // Validate emails belong to user and are unique
-  const uniqueEmailIds = Array.from(new Set(recipientEmailIds));
+  /**
+   * Validate emails belong to user and are unique.
+   */
+  const uniqueEmailIds = Array.from(
+    new Set(recipientEmailIds)
+  );
+
   const emails = await prisma.email.findMany({
-    where: { id: { in: uniqueEmailIds }, userId },
+    where: {
+      id: {
+        in: uniqueEmailIds,
+      },
+      userId,
+    },
   });
-  if (emails.length !== uniqueEmailIds.length) {
-    throw new Error("One or more emails were not found or do not belong to you");
+
+  if (
+    emails.length !== uniqueEmailIds.length
+  ) {
+    throw new Error(
+      "One or more emails were not found or do not belong to you"
+    );
   }
 
-  // Normalize steps
+  /**
+   * Normalize steps.
+   */
   const normalizedSteps = steps
-  .map((s, idx) => ({
-    stepNumber: s.stepNumber ?? idx + 1,
-    delayDays: Math.max(1, s.delayDays ?? 1),
-    subject: (s.subject || "").trim(),
-    body: s.body || "",
-    enabled: s.enabled !== false,
+    .map((s, idx) => ({
+      stepNumber:
+        s.stepNumber ?? idx + 1,
 
-    selectedTemplateIds: Array.from(
-      new Set(
-        idx === 0
-          ? [
-              ...(selectedTemplateIds || []),
-              ...(s.selectedTemplateIds || []),
-            ]
-          : (s.selectedTemplateIds || [])
-      )
-    ),
-  }))
-  .filter((s) => s.subject.length > 0);
+      delayDays: Math.max(
+        1,
+        s.delayDays ?? 1
+      ),
 
-  if (normalizedSteps.length === 0) {
-    throw new Error("At least one valid follow-up step with a subject is required");
+      subject:
+        (s.subject || "").trim(),
+
+      body:
+        s.body || "",
+
+      enabled:
+        s.enabled !== false,
+
+      selectedTemplateIds:
+        Array.from(
+          new Set(
+            idx === 0
+              ? [
+                  ...(selectedTemplateIds || []),
+                  ...(s.selectedTemplateIds || []),
+                ]
+              : [
+                  ...(s.selectedTemplateIds || []),
+                ]
+          )
+        ),
+    }))
+    .filter(
+      (s) => s.subject.length > 0
+    );
+
+  if (
+    normalizedSteps.length === 0
+  ) {
+    throw new Error(
+      "At least one valid follow-up step with a subject is required"
+    );
   }
 
   const scheduleBase =
@@ -320,128 +422,320 @@ export async function createCampaign(
       : new Date();
 
   const campaignStatus: FollowUpCampaignStatus =
-    scheduledAt && new Date(scheduledAt) > new Date()
+    scheduledAt &&
+    new Date(scheduledAt) > new Date()
       ? "SCHEDULED"
       : "DRAFT";
 
-  return prisma.$transaction(async (tx) => {
-    const campaign = await tx.followUpCampaign.create({
-      data: {
-        userId,
-        smtpConfigs: {
-          connect: uniqueSmtpIds.map((id) => ({
-            id,
-          })),
-        },
-        name: name.trim(),
-        campaignType,
-        status: campaignStatus,
-        stopOnReply,
-        intervalValue,
-        intervalUnit,
-        dailyLimit,
-        greetingEnabled,
-        spinTextEnabled,
-        timezone,
-        sendingStart,
-        sendingEnd,
-        scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
+  /**
+   * ============================================================
+   * CREATE CAMPAIGN + STEPS
+   * ============================================================
+   *
+   * This transaction only contains campaign-level data.
+   * It does NOT contain 4000 recipient inserts.
+   */
+  const campaign =
+    await prisma.$transaction(
+      async (tx) => {
+        return tx.followUpCampaign.create({
+          data: {
+            userId,
 
-        steps: {
-          create: normalizedSteps.map((s) => ({
-            stepNumber: s.stepNumber,
-            delayDays: s.delayDays,
-            subject: s.subject,
-            body: s.body,
-            enabled: s.enabled,
-            templates:
-              s.selectedTemplateIds.length > 0
-                ? {
-                  connect: s.selectedTemplateIds.map((id) => ({
+            smtpConfigs: {
+              connect:
+                uniqueSmtpIds.map(
+                  (id) => ({
                     id,
-                  })),
-                }
-                : undefined,
-          })),
-        },
-      },
-      include: {
-  steps: {
-    orderBy: { stepNumber: "asc" },
-    include: {
-      templates: true,
-    },
-  },
-},
-    });
+                  })
+                ),
+            },
 
-    const enabledSteps = campaign.steps.filter((s) => s.enabled);
-    const firstStep = enabledSteps[0];
+            name: name.trim(),
 
-    // Create recipients + recipient-steps
-    for (const email of emails) {
-      const firstScheduledAt =
-        campaignType === "EMAIL"
-          ? scheduleBase
-          : computeFirstScheduledAt(scheduleBase, firstStep.delayDays);
+            campaignType,
 
-      await tx.followUpRecipient.create({
-        data: {
-          campaignId: campaign.id,
-          emailId: email.id,
-          status: "PENDING",
-          currentStep: 0,
-          nextStepAt: firstScheduledAt,
-          steps: {
-            create: campaign.steps.map((step, index) => {
-              // Only the first enabled step gets a concrete scheduledAt initially
-              const isFirstEnabled =
-                firstStep && step.id === firstStep.id;
-              return {
-                stepId: step.id,
-                status: "PENDING" as FollowUpStepStatus,
-                scheduledAt: isFirstEnabled ? firstScheduledAt : null,
-              };
-            }),
+            status:
+              campaignStatus,
+
+            stopOnReply,
+
+            intervalValue,
+
+            intervalUnit,
+
+            dailyLimit,
+
+            greetingEnabled,
+
+            spinTextEnabled,
+
+            timezone,
+
+            sendingStart,
+
+            sendingEnd,
+
+            scheduledAt:
+              scheduledAt
+                ? new Date(
+                    scheduledAt
+                  )
+                : null,
+
+            steps: {
+              create:
+                normalizedSteps.map(
+                  (s) => ({
+                    stepNumber:
+                      s.stepNumber,
+
+                    delayDays:
+                      s.delayDays,
+
+                    subject:
+                      s.subject,
+
+                    body:
+                      s.body,
+
+                    enabled:
+                      s.enabled,
+
+                    templates:
+                      s.selectedTemplateIds
+                        .length > 0
+                        ? {
+                            connect:
+                              s.selectedTemplateIds.map(
+                                (
+                                  id
+                                ) => ({
+                                  id,
+                                })
+                              ),
+                          }
+                        : undefined,
+                  })
+                ),
+            },
           },
-        },
-      });
-    }
 
-    return tx.followUpCampaign.findUniqueOrThrow({
-  where: { id: campaign.id },
-  include: {
-    steps: {
-      orderBy: { stepNumber: "asc" },
-      include: {
-        templates: true,
-      },
-    },
-
-    recipients: {
-      include: {
-        email: true,
-        steps: {
           include: {
-            step: {
+            steps: {
+              orderBy: {
+                stepNumber:
+                  "asc",
+              },
+
               include: {
                 templates: true,
               },
             },
           },
-          orderBy: {
-            step: {
-              stepNumber: "asc",
+        });
+      },
+      {
+        maxWait: 10000,
+        timeout: 30000,
+      }
+    );
+
+  /**
+   * ============================================================
+   * ENABLED STEPS
+   * ============================================================
+   */
+  const enabledSteps =
+    campaign.steps.filter(
+      (s) => s.enabled
+    );
+
+  const firstStep =
+    enabledSteps[0];
+
+  if (!firstStep) {
+    throw new Error(
+      "Campaign has no enabled steps"
+    );
+  }
+
+  /**
+   * Calculate first schedule once.
+   */
+  const firstScheduledAt =
+    campaignType === "EMAIL"
+      ? scheduleBase
+      : computeFirstScheduledAt(
+          scheduleBase,
+          firstStep.delayDays
+        );
+
+  /**
+   * ============================================================
+   * CREATE RECIPIENTS IN BATCHES
+   * ============================================================
+   */
+  for (
+    let i = 0;
+    i < emails.length;
+    i += RECIPIENT_BATCH_SIZE
+  ) {
+    const emailBatch =
+      emails.slice(
+        i,
+        i + RECIPIENT_BATCH_SIZE
+      );
+
+    /**
+     * Insert recipients in bulk.
+     */
+    await prisma.followUpRecipient.createMany(
+      {
+        data: emailBatch.map(
+          (email) => ({
+            campaignId:
+              campaign.id,
+
+            emailId:
+              email.id,
+
+            status:
+              "PENDING",
+
+            currentStep:
+              0,
+
+            nextStepAt:
+              firstScheduledAt,
+          })
+        ),
+      }
+    );
+
+    /**
+     * Fetch only the recipients from this batch.
+     */
+    const createdRecipients =
+      await prisma.followUpRecipient.findMany(
+        {
+          where: {
+            campaignId:
+              campaign.id,
+
+            emailId: {
+              in: emailBatch.map(
+                (email) =>
+                  email.id
+              ),
             },
           },
-        },
-      },
-    },
 
-    smtpConfigs: true,
-  },
-});
-  });
+          select: {
+            id: true,
+            emailId: true,
+          },
+        }
+      );
+
+    /**
+     * Create all recipient-step rows
+     * in one bulk query.
+     */
+    const recipientStepData =
+      createdRecipients.flatMap(
+        (recipient) =>
+          campaign.steps.map(
+            (step) => ({
+              recipientId:
+                recipient.id,
+
+              stepId:
+                step.id,
+
+              status:
+                "PENDING" as FollowUpStepStatus,
+
+              scheduledAt:
+                firstStep &&
+                step.id ===
+                  firstStep.id
+                  ? firstScheduledAt
+                  : null,
+            })
+          )
+      );
+
+    if (
+      recipientStepData.length >
+      0
+    ) {
+      await prisma.followUpRecipientStep.createMany(
+        {
+          data:
+            recipientStepData,
+        }
+      );
+    }
+  }
+
+  /**
+   * ============================================================
+   * RETURN FULL CAMPAIGN
+   * ============================================================
+   *
+   * This is intentionally outside the transaction.
+   * This prevents a huge 4000-recipient nested query from
+   * extending the transaction lifetime.
+   */
+  return prisma.followUpCampaign.findUniqueOrThrow(
+    {
+      where: {
+        id: campaign.id,
+      },
+
+      include: {
+        steps: {
+          orderBy: {
+            stepNumber: "asc",
+          },
+
+          include: {
+            templates: true,
+          },
+        },
+
+        recipients: {
+          include: {
+            email: true,
+
+            steps: {
+              include: {
+                step: {
+                  include: {
+                    templates: true,
+                  },
+                },
+              },
+
+              orderBy: {
+                step: {
+                  stepNumber:
+                    "asc",
+                },
+              },
+            },
+          },
+
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+
+        smtpConfigs: true,
+      },
+    }
+  );
 }
 
 /**
@@ -451,46 +745,62 @@ export async function listCampaigns(
   prisma: PrismaClient,
   userId: string
 ): Promise<CampaignListItem[]> {
-  const campaigns = await prisma.followUpCampaign.findMany({
-  where: { userId },
-
-  include: {
-    smtpConfigs: true,
-
-    steps: {
-      orderBy: {
-        stepNumber: "asc",
+  const campaigns =
+    await prisma.followUpCampaign.findMany({
+      where: {
+        userId,
       },
+
       include: {
-        templates: true,
+        smtpConfigs: true,
+
+        steps: {
+          orderBy: {
+            stepNumber:
+              "asc",
+          },
+
+          include: {
+            templates: true,
+          },
+        },
+
+        recipients: {
+          select: {
+            status: true,
+          },
+        },
+
+        _count: {
+          select: {
+            recipients: true,
+          },
+        },
       },
-    },
 
-    recipients: {
-      select: {
-        status: true,
+      orderBy: {
+        createdAt:
+          "desc",
       },
-    },
+    });
 
-    _count: {
-      select: {
-        recipients: true,
-      },
-    },
-  },
+  return campaigns.map(
+    (c) => {
+      const {
+        recipients,
+        ...rest
+      } = c;
 
-  orderBy: {
-    createdAt: "desc",
-  },
-});
-  return campaigns.map((c) => {
-    const { recipients, ...rest } = c;
+      return {
+        ...rest,
 
-    return {
-      ...rest,
-      stats: computeCampaignStats(recipients),
-    };
-  });
+        stats:
+          computeCampaignStats(
+            recipients
+          ),
+      };
+    }
+  );
 }
 
 /**
@@ -501,28 +811,64 @@ export async function getCampaignDetail(
   campaignId: string,
   userId: string
 ): Promise<CampaignDetail | null> {
-  const campaign = await prisma.followUpCampaign.findFirst({
-    where: { id: campaignId, userId },
-    include: {
-      steps: { orderBy: { stepNumber: "asc" } },
-      recipients: {
-        include: {
-          email: true,
-          steps: {
-            include: { step: true },
-            orderBy: { step: { stepNumber: "asc" } },
-          },
+  const campaign =
+    await prisma.followUpCampaign.findFirst(
+      {
+        where: {
+          id: campaignId,
+          userId,
         },
-        orderBy: { createdAt: "asc" },
-      },
-      smtpConfigs: true,
-    },
-  });
 
-  if (!campaign) return null;
+        include: {
+          steps: {
+            orderBy: {
+              stepNumber:
+                "asc",
+            },
+          },
 
-  const stats = computeCampaignStats(campaign.recipients);
-  return { ...campaign, stats };
+          recipients: {
+            include: {
+              email: true,
+
+              steps: {
+                include: {
+                  step: true,
+                },
+
+                orderBy: {
+                  step: {
+                    stepNumber:
+                      "asc",
+                  },
+                },
+              },
+            },
+
+            orderBy: {
+              createdAt:
+                "asc",
+            },
+          },
+
+          smtpConfigs: true,
+        },
+      }
+    );
+
+  if (!campaign) {
+    return null;
+  }
+
+  const stats =
+    computeCampaignStats(
+      campaign.recipients
+    );
+
+  return {
+    ...campaign,
+    stats,
+  };
 }
 
 /**
@@ -534,22 +880,32 @@ export async function updateCampaign(
   userId: string,
   input: UpdateCampaignInput
 ) {
-  const existing = await getOwnedCampaign(prisma, campaignId, userId);
+  const existing =
+    await getOwnedCampaign(
+      prisma,
+      campaignId,
+      userId
+    );
 
   if (!existing) {
-    throw new Error("Campaign not found");
+    throw new Error(
+      "Campaign not found"
+    );
   }
 
-  // Completed / stopped campaigns:
-  // only allow normal editable fields, not status/SMTP/schedule changes
   if (
-    existing.status === "COMPLETED" ||
-    existing.status === "STOPPED"
+    existing.status ===
+      "COMPLETED" ||
+    existing.status ===
+      "STOPPED"
   ) {
     if (
-      input.status !== undefined ||
-      input.smtpConfigIds !== undefined ||
-      input.scheduledAt !== undefined
+      input.status !==
+        undefined ||
+      input.smtpConfigIds !==
+        undefined ||
+      input.scheduledAt !==
+        undefined
     ) {
       throw new Error(
         "Cannot modify a completed or stopped campaign"
@@ -557,228 +913,398 @@ export async function updateCampaign(
     }
   }
 
-  /*
-   * ============================================
-   * VALIDATE MULTIPLE SMTP CONFIGURATIONS
-   * ============================================
-   */
-  let uniqueSmtpIds: string[] | undefined;
+  let uniqueSmtpIds:
+    | string[]
+    | undefined;
 
-  if (input.smtpConfigIds !== undefined) {
-    uniqueSmtpIds = Array.from(
-      new Set(input.smtpConfigIds)
-    );
+  if (
+    input.smtpConfigIds !==
+    undefined
+  ) {
+    uniqueSmtpIds =
+      Array.from(
+        new Set(
+          input.smtpConfigIds
+        )
+      );
 
-    if (uniqueSmtpIds.length === 0) {
+    if (
+      uniqueSmtpIds.length ===
+      0
+    ) {
       throw new Error(
         "At least one SMTP configuration is required"
       );
     }
 
-    const smtpAccounts = await prisma.sMTPConfig.findMany({
-      where: {
-        id: {
-          in: uniqueSmtpIds,
-        },
-        userId,
-      },
-    });
+    const smtpAccounts =
+      await prisma.sMTPConfig.findMany(
+        {
+          where: {
+            id: {
+              in: uniqueSmtpIds,
+            },
 
-    if (smtpAccounts.length !== uniqueSmtpIds.length) {
+            userId,
+          },
+        }
+      );
+
+    if (
+      smtpAccounts.length !==
+      uniqueSmtpIds.length
+    ) {
       throw new Error(
         "One or more SMTP configurations were not found or do not belong to you"
       );
     }
   }
 
-  /*
-   * ============================================
-   * BUILD UPDATE DATA
-   * ============================================
-   */
+  const data: Prisma.FollowUpCampaignUpdateInput =
+    {};
 
-  const data: Prisma.FollowUpCampaignUpdateInput = {};
-
-  if (input.name !== undefined) {
-    data.name = input.name.trim();
+  if (
+    input.name !==
+    undefined
+  ) {
+    data.name =
+      input.name.trim();
   }
 
-  /*
-   * MULTI SMTP
-   */
-  if (uniqueSmtpIds !== undefined) {
+  if (
+    uniqueSmtpIds !==
+    undefined
+  ) {
     data.smtpConfigs = {
-      set: uniqueSmtpIds.map((id) => ({
-        id,
-      })),
+      set:
+        uniqueSmtpIds.map(
+          (id) => ({
+            id,
+          })
+        ),
     };
   }
 
-  if (input.stopOnReply !== undefined) {
-    data.stopOnReply = input.stopOnReply;
+  if (
+    input.stopOnReply !==
+    undefined
+  ) {
+    data.stopOnReply =
+      input.stopOnReply;
   }
 
-  if (input.timezone !== undefined) {
-    data.timezone = input.timezone;
+  if (
+    input.timezone !==
+    undefined
+  ) {
+    data.timezone =
+      input.timezone;
   }
 
-  if (input.sendingStart !== undefined) {
-    data.sendingStart = input.sendingStart;
+  if (
+    input.sendingStart !==
+    undefined
+  ) {
+    data.sendingStart =
+      input.sendingStart;
   }
 
-  if (input.sendingEnd !== undefined) {
-    data.sendingEnd = input.sendingEnd;
+  if (
+    input.sendingEnd !==
+    undefined
+  ) {
+    data.sendingEnd =
+      input.sendingEnd;
   }
 
-  if (input.scheduledAt !== undefined) {
-    data.scheduledAt = input.scheduledAt
-      ? new Date(input.scheduledAt)
-      : null;
+  if (
+    input.scheduledAt !==
+    undefined
+  ) {
+    data.scheduledAt =
+      input.scheduledAt
+        ? new Date(
+            input.scheduledAt
+          )
+        : null;
   }
 
-  if (input.status !== undefined) {
-    data.status = input.status;
+  if (
+    input.status !==
+    undefined
+  ) {
+    data.status =
+      input.status;
   }
 
-  /*
-   * ============================================
-   * UPDATE CAMPAIGN
-   * ============================================
-   */
-
-  return prisma.followUpCampaign.update({
-    where: {
-      id: campaignId,
-    },
-    data,
-    include: {
-      steps: {
-        orderBy: {
-          stepNumber: "asc",
-        },
+  return prisma.followUpCampaign.update(
+    {
+      where: {
+        id: campaignId,
       },
 
-      recipients: {
-        include: {
-          email: true,
-        },
-      },
+      data,
 
-      smtpConfigs: true,
-    },
-  });
+      include: {
+        steps: {
+          orderBy: {
+            stepNumber:
+              "asc",
+          },
+        },
+
+        recipients: {
+          include: {
+            email: true,
+          },
+        },
+
+        smtpConfigs: true,
+      },
+    }
+  );
 }
 
 /**
- * Soft-safe delete (cascade handles children via schema).
+ * Soft-safe delete.
  */
 export async function deleteCampaign(
   prisma: PrismaClient,
   campaignId: string,
   userId: string
 ) {
-  const existing = await getOwnedCampaign(prisma, campaignId, userId);
+  const existing =
+    await getOwnedCampaign(
+      prisma,
+      campaignId,
+      userId
+    );
+
   if (!existing) {
-    throw new Error("Campaign not found");
+    throw new Error(
+      "Campaign not found"
+    );
   }
 
-  await prisma.followUpCampaign.delete({
-    where: { id: campaignId },
-  });
+  await prisma.followUpCampaign.delete(
+    {
+      where: {
+        id: campaignId,
+      },
+    }
+  );
 
-  return { id: campaignId };
+  return {
+    id: campaignId,
+  };
 }
 
 /**
- * Start a campaign: DRAFT/SCHEDULED/PAUSED -> RUNNING.
- * Ensures first enabled steps have nextStepAt / scheduledAt set.
+ * Start a campaign.
  */
 export async function startCampaign(
   prisma: PrismaClient,
   campaignId: string,
   userId: string
 ) {
-  const campaign = await prisma.followUpCampaign.findFirst({
-    where: { id: campaignId, userId },
-    include: {
-      steps: { orderBy: { stepNumber: "asc" } },
-      recipients: {
+  const campaign =
+    await prisma.followUpCampaign.findFirst(
+      {
+        where: {
+          id: campaignId,
+          userId,
+        },
+
         include: {
           steps: {
-            include: { step: true },
-            orderBy: { step: { stepNumber: "asc" } },
+            orderBy: {
+              stepNumber:
+                "asc",
+            },
+          },
+
+          recipients: {
+            include: {
+              steps: {
+                include: {
+                  step: true,
+                },
+
+                orderBy: {
+                  step: {
+                    stepNumber:
+                      "asc",
+                  },
+                },
+              },
+            },
           },
         },
-      },
-    },
-  });
+      }
+    );
 
-  if (!campaign) throw new Error("Campaign not found");
-  if (campaign.status === "RUNNING") {
+  if (!campaign) {
+    throw new Error(
+      "Campaign not found"
+    );
+  }
+
+  if (
+    campaign.status ===
+    "RUNNING"
+  ) {
     return campaign;
   }
-  if (campaign.status === "COMPLETED" || campaign.status === "STOPPED") {
-    throw new Error("Cannot start a completed or stopped campaign");
-  }
-  if (campaign.recipients.length === 0) {
-    throw new Error("Campaign has no recipients");
+
+  if (
+    campaign.status ===
+      "COMPLETED" ||
+    campaign.status ===
+      "STOPPED"
+  ) {
+    throw new Error(
+      "Cannot start a completed or stopped campaign"
+    );
   }
 
-  const enabledSteps = campaign.steps.filter((s) => s.enabled);
-  if (enabledSteps.length === 0) {
-    throw new Error("Campaign has no enabled steps");
+  if (
+    campaign.recipients
+      .length === 0
+  ) {
+    throw new Error(
+      "Campaign has no recipients"
+    );
   }
 
-  const now = new Date();
-  const firstStep = enabledSteps[0];
+  const enabledSteps =
+    campaign.steps.filter(
+      (s) => s.enabled
+    );
 
-  return prisma.$transaction(async (tx) => {
-    // Ensure each PENDING recipient has nextStepAt and first step scheduledAt
-    for (const recipient of campaign.recipients) {
-      if (
-        recipient.status === "REPLIED" ||
-        recipient.status === "COMPLETED" ||
-        recipient.status === "STOPPED" ||
-        recipient.status === "FAILED"
+  if (
+    enabledSteps.length ===
+    0
+  ) {
+    throw new Error(
+      "Campaign has no enabled steps"
+    );
+  }
+
+  const now =
+    new Date();
+
+  const firstStep =
+    enabledSteps[0];
+
+  /**
+   * Keep transaction timeout higher for this operation,
+   * while preserving the original logic.
+   */
+  return prisma.$transaction(
+    async (tx) => {
+      for (
+        const recipient of
+        campaign.recipients
       ) {
-        continue;
+        if (
+          recipient.status ===
+            "REPLIED" ||
+          recipient.status ===
+            "COMPLETED" ||
+          recipient.status ===
+            "STOPPED" ||
+          recipient.status ===
+            "FAILED"
+        ) {
+          continue;
+        }
+
+        let nextStepAt =
+          recipient.nextStepAt;
+
+        if (!nextStepAt) {
+          nextStepAt =
+            computeFirstScheduledAt(
+              now,
+              firstStep.delayDays
+            );
+
+          await tx.followUpRecipient.update(
+            {
+              where: {
+                id: recipient.id,
+              },
+
+              data: {
+                nextStepAt,
+                status:
+                  "PENDING",
+              },
+            }
+          );
+        }
+
+        const firstRecipientStep =
+          recipient.steps.find(
+            (rs) =>
+              rs.stepId ===
+                firstStep.id &&
+              rs.status ===
+                "PENDING"
+          );
+
+        if (
+          firstRecipientStep &&
+          !firstRecipientStep.scheduledAt
+        ) {
+          await tx.followUpRecipientStep.update(
+            {
+              where: {
+                id: firstRecipientStep.id,
+              },
+
+              data: {
+                scheduledAt:
+                  nextStepAt,
+              },
+            }
+          );
+        }
       }
 
-      let nextStepAt = recipient.nextStepAt;
-      if (!nextStepAt) {
-        nextStepAt = computeFirstScheduledAt(now, firstStep.delayDays);
-        await tx.followUpRecipient.update({
-          where: { id: recipient.id },
-          data: {
-            nextStepAt,
-            status: "PENDING",
+      return tx.followUpCampaign.update(
+        {
+          where: {
+            id: campaignId,
           },
-        });
-      }
 
-      // Ensure first enabled recipient-step has scheduledAt
-      const firstRecipientStep = recipient.steps.find(
-        (rs) => rs.stepId === firstStep.id && rs.status === "PENDING"
+          data: {
+            status:
+              "RUNNING",
+          },
+
+          include: {
+            steps: {
+              orderBy: {
+                stepNumber:
+                  "asc",
+              },
+            },
+
+            recipients: {
+              include: {
+                email: true,
+              },
+            },
+          },
+        }
       );
-      if (firstRecipientStep && !firstRecipientStep.scheduledAt) {
-        await tx.followUpRecipientStep.update({
-          where: { id: firstRecipientStep.id },
-          data: { scheduledAt: nextStepAt },
-        });
-      }
+    },
+    {
+      maxWait: 10000,
+      timeout: 60000,
     }
-
-    return tx.followUpCampaign.update({
-      where: { id: campaignId },
-      data: { status: "RUNNING" },
-      include: {
-        steps: { orderBy: { stepNumber: "asc" } },
-        recipients: {
-          include: { email: true },
-        },
-      },
-    });
-  });
+  );
 }
 
 /**
@@ -789,82 +1315,184 @@ export async function pauseCampaign(
   campaignId: string,
   userId: string
 ) {
-  const campaign = await getOwnedCampaign(prisma, campaignId, userId);
-  if (!campaign) throw new Error("Campaign not found");
-  if (campaign.status !== "RUNNING") {
-    throw new Error("Only running campaigns can be paused");
+  const campaign =
+    await getOwnedCampaign(
+      prisma,
+      campaignId,
+      userId
+    );
+
+  if (!campaign) {
+    throw new Error(
+      "Campaign not found"
+    );
   }
 
-  return prisma.followUpCampaign.update({
-    where: { id: campaignId },
-    data: { status: "PAUSED" },
-  });
+  if (
+    campaign.status !==
+    "RUNNING"
+  ) {
+    throw new Error(
+      "Only running campaigns can be paused"
+    );
+  }
+
+  return prisma.followUpCampaign.update(
+    {
+      where: {
+        id: campaignId,
+      },
+
+      data: {
+        status: "PAUSED",
+      },
+    }
+  );
 }
 
 /**
- * Resume: PAUSED -> RUNNING. Recalculate overdue nextStepAt safely.
+ * Resume: PAUSED -> RUNNING.
  */
 export async function resumeCampaign(
   prisma: PrismaClient,
   campaignId: string,
   userId: string
 ) {
-  const campaign = await prisma.followUpCampaign.findFirst({
-    where: { id: campaignId, userId },
-    include: {
-      steps: { orderBy: { stepNumber: "asc" } },
-      recipients: {
+  const campaign =
+    await prisma.followUpCampaign.findFirst(
+      {
         where: {
-          status: { in: ["PENDING", "RUNNING"] },
+          id: campaignId,
+          userId,
         },
+
         include: {
           steps: {
-            where: { status: "PENDING" },
-            include: { step: true },
-            orderBy: { step: { stepNumber: "asc" } },
+            orderBy: {
+              stepNumber:
+                "asc",
+            },
+          },
+
+          recipients: {
+            where: {
+              status: {
+                in: [
+                  "PENDING",
+                  "RUNNING",
+                ],
+              },
+            },
+
+            include: {
+              steps: {
+                where: {
+                  status:
+                    "PENDING",
+                },
+
+                include: {
+                  step: true,
+                },
+
+                orderBy: {
+                  step: {
+                    stepNumber:
+                      "asc",
+                  },
+                },
+              },
+            },
           },
         },
-      },
-    },
-  });
+      }
+    );
 
-  if (!campaign) throw new Error("Campaign not found");
-  if (campaign.status !== "PAUSED") {
-    throw new Error("Only paused campaigns can be resumed");
+  if (!campaign) {
+    throw new Error(
+      "Campaign not found"
+    );
   }
 
-  const now = new Date();
+  if (
+    campaign.status !==
+    "PAUSED"
+  ) {
+    throw new Error(
+      "Only paused campaigns can be resumed"
+    );
+  }
 
-  return prisma.$transaction(async (tx) => {
-    for (const recipient of campaign.recipients) {
-      // If nextStepAt is in the past, push it to now so it becomes due
-      // on the next process tick (still respects sending window).
-      if (recipient.nextStepAt && recipient.nextStepAt < now) {
-        await tx.followUpRecipient.update({
-          where: { id: recipient.id },
-          data: { nextStepAt: now },
-        });
-      }
+  const now =
+    new Date();
 
-      // Align pending step scheduledAt with nextStepAt if overdue
-      const nextPending = recipient.steps[0];
-      if (
-        nextPending &&
-        nextPending.scheduledAt &&
-        nextPending.scheduledAt < now
+  return prisma.$transaction(
+    async (tx) => {
+      for (
+        const recipient of
+        campaign.recipients
       ) {
-        await tx.followUpRecipientStep.update({
-          where: { id: nextPending.id },
-          data: { scheduledAt: now },
-        });
-      }
-    }
+        if (
+          recipient.nextStepAt &&
+          recipient.nextStepAt <
+            now
+        ) {
+          await tx.followUpRecipient.update(
+            {
+              where: {
+                id: recipient.id,
+              },
 
-    return tx.followUpCampaign.update({
-      where: { id: campaignId },
-      data: { status: "RUNNING" },
-    });
-  });
+              data: {
+                nextStepAt:
+                  now,
+              },
+            }
+          );
+        }
+
+        const nextPending =
+          recipient.steps[0];
+
+        if (
+          nextPending &&
+          nextPending.scheduledAt &&
+          nextPending.scheduledAt <
+            now
+        ) {
+          await tx.followUpRecipientStep.update(
+            {
+              where: {
+                id: nextPending.id,
+              },
+
+              data: {
+                scheduledAt:
+                  now,
+              },
+            }
+          );
+        }
+      }
+
+      return tx.followUpCampaign.update(
+        {
+          where: {
+            id: campaignId,
+          },
+
+          data: {
+            status:
+              "RUNNING",
+          },
+        }
+      );
+    },
+    {
+      maxWait: 10000,
+      timeout: 60000,
+    }
+  );
 }
 
 /**
@@ -875,49 +1503,118 @@ export async function stopCampaign(
   campaignId: string,
   userId: string
 ) {
-  const campaign = await getOwnedCampaign(prisma, campaignId, userId);
-  if (!campaign) throw new Error("Campaign not found");
-  if (campaign.status === "STOPPED" || campaign.status === "COMPLETED") {
+  const campaign =
+    await getOwnedCampaign(
+      prisma,
+      campaignId,
+      userId
+    );
+
+  if (!campaign) {
+    throw new Error(
+      "Campaign not found"
+    );
+  }
+
+  if (
+    campaign.status ===
+      "STOPPED" ||
+    campaign.status ===
+      "COMPLETED"
+  ) {
     return campaign;
   }
 
-  return prisma.$transaction(async (tx) => {
-    // Cancel pending / sending steps
-    const recipients = await tx.followUpRecipient.findMany({
-      where: {
-        campaignId,
-        status: { in: ["PENDING", "RUNNING"] },
-      },
-      select: { id: true },
-    });
+  return prisma.$transaction(
+    async (tx) => {
+      const recipients =
+        await tx.followUpRecipient.findMany(
+          {
+            where: {
+              campaignId,
 
-    const recipientIds = recipients.map((r) => r.id);
+              status: {
+                in: [
+                  "PENDING",
+                  "RUNNING",
+                ],
+              },
+            },
 
-    if (recipientIds.length > 0) {
-      await tx.followUpRecipientStep.updateMany({
-        where: {
-          recipientId: { in: recipientIds },
-          status: { in: ["PENDING", "SENDING"] },
-        },
-        data: { status: "CANCELLED" },
-      });
+            select: {
+              id: true,
+            },
+          }
+        );
 
-      await tx.followUpRecipient.updateMany({
-        where: {
-          id: { in: recipientIds },
-        },
-        data: {
-          status: "STOPPED",
-          nextStepAt: null,
-        },
-      });
+      const recipientIds =
+        recipients.map(
+          (r) => r.id
+        );
+
+      if (
+        recipientIds.length >
+        0
+      ) {
+        await tx.followUpRecipientStep.updateMany(
+          {
+            where: {
+              recipientId: {
+                in: recipientIds,
+              },
+
+              status: {
+                in: [
+                  "PENDING",
+                  "SENDING",
+                ],
+              },
+            },
+
+            data: {
+              status:
+                "CANCELLED",
+            },
+          }
+        );
+
+        await tx.followUpRecipient.updateMany(
+          {
+            where: {
+              id: {
+                in: recipientIds,
+              },
+            },
+
+            data: {
+              status:
+                "STOPPED",
+
+              nextStepAt:
+                null,
+            },
+          }
+        );
+      }
+
+      return tx.followUpCampaign.update(
+        {
+          where: {
+            id: campaignId,
+          },
+
+          data: {
+            status:
+              "STOPPED",
+          },
+        }
+      );
+    },
+    {
+      maxWait: 10000,
+      timeout: 30000,
     }
-
-    return tx.followUpCampaign.update({
-      where: { id: campaignId },
-      data: { status: "STOPPED" },
-    });
-  });
+  );
 }
 
 /**
@@ -928,150 +1625,408 @@ export async function getCampaignStats(
   campaignId: string,
   userId: string
 ): Promise<CampaignStats> {
-  const campaign = await prisma.followUpCampaign.findFirst({
-    where: { id: campaignId, userId },
-    include: {
-      recipients: { select: { status: true } },
-    },
-  });
+  const campaign =
+    await prisma.followUpCampaign.findFirst(
+      {
+        where: {
+          id: campaignId,
+          userId,
+        },
+
+        include: {
+          recipients: {
+            select: {
+              status: true,
+            },
+          },
+        },
+      }
+    );
 
   if (!campaign) {
-    throw new Error("Campaign not found");
+    throw new Error(
+      "Campaign not found"
+    );
   }
 
-  return computeCampaignStats(campaign.recipients);
+  return computeCampaignStats(
+    campaign.recipients
+  );
 }
 
 /**
  * Add recipients to an existing campaign.
+ *
+ * Uses createMany + batches instead of one transaction
+ * containing thousands of individual creates.
  */
 export async function addRecipients(
   prisma: PrismaClient,
   userId: string,
   input: AddRecipientsInput
 ) {
-  const { campaignId, emailIds } = input;
+  const {
+    campaignId,
+    emailIds,
+  } = input;
 
-  if (!Array.isArray(emailIds) || emailIds.length === 0) {
-    throw new Error("emailIds is required");
+  if (
+    !Array.isArray(emailIds) ||
+    emailIds.length === 0
+  ) {
+    throw new Error(
+      "emailIds is required"
+    );
   }
 
-  const campaign = await prisma.followUpCampaign.findFirst({
-    where: { id: campaignId, userId },
-    include: {
-      steps: { orderBy: { stepNumber: "asc" } },
-    },
-  });
+  const campaign =
+    await prisma.followUpCampaign.findFirst(
+      {
+        where: {
+          id: campaignId,
+          userId,
+        },
 
-  if (!campaign) throw new Error("Campaign not found");
-  if (campaign.status === "STOPPED" || campaign.status === "COMPLETED") {
-    throw new Error("Cannot add recipients to a stopped or completed campaign");
+        include: {
+          steps: {
+            orderBy: {
+              stepNumber:
+                "asc",
+            },
+          },
+        },
+      }
+    );
+
+  if (!campaign) {
+    throw new Error(
+      "Campaign not found"
+    );
   }
 
-  const uniqueEmailIds = Array.from(new Set(emailIds));
-  const emails = await prisma.email.findMany({
-    where: { id: { in: uniqueEmailIds }, userId },
-  });
-  if (emails.length !== uniqueEmailIds.length) {
-    throw new Error("One or more emails were not found or do not belong to you");
+  if (
+    campaign.status ===
+      "STOPPED" ||
+    campaign.status ===
+      "COMPLETED"
+  ) {
+    throw new Error(
+      "Cannot add recipients to a stopped or completed campaign"
+    );
   }
 
-  // Existing recipients in this campaign
-  const existing = await prisma.followUpRecipient.findMany({
-    where: {
-      campaignId,
-      emailId: { in: uniqueEmailIds },
-    },
-    select: { emailId: true },
-  });
-  const existingSet = new Set(existing.map((e) => e.emailId));
-  const toAdd = emails.filter((e) => !existingSet.has(e.id));
+  const uniqueEmailIds =
+    Array.from(
+      new Set(emailIds)
+    );
 
-  if (toAdd.length === 0) {
-    return { added: 0, recipients: [] };
+  const emails =
+    await prisma.email.findMany(
+      {
+        where: {
+          id: {
+            in: uniqueEmailIds,
+          },
+
+          userId,
+        },
+      }
+    );
+
+  if (
+    emails.length !==
+    uniqueEmailIds.length
+  ) {
+    throw new Error(
+      "One or more emails were not found or do not belong to you"
+    );
   }
 
-  const enabledSteps = campaign.steps.filter((s) => s.enabled);
-  const firstStep = enabledSteps[0];
-  const now = new Date();
+  /**
+   * Existing recipients.
+   */
+  const existing =
+    await prisma.followUpRecipient.findMany(
+      {
+        where: {
+          campaignId,
+
+          emailId: {
+            in: uniqueEmailIds,
+          },
+        },
+
+        select: {
+          emailId: true,
+        },
+      }
+    );
+
+  const existingSet =
+    new Set(
+      existing.map(
+        (e) => e.emailId
+      )
+    );
+
+  const toAdd =
+    emails.filter(
+      (e) =>
+        !existingSet.has(
+          e.id
+        )
+    );
+
+  if (
+    toAdd.length === 0
+  ) {
+    return {
+      added: 0,
+      recipients: [],
+    };
+  }
+
+  const enabledSteps =
+    campaign.steps.filter(
+      (s) => s.enabled
+    );
+
+  const firstStep =
+    enabledSteps[0];
+
+  const now =
+    new Date();
+
   const base =
-    campaign.scheduledAt && campaign.scheduledAt > now
+    campaign.scheduledAt &&
+    campaign.scheduledAt >
+      now
       ? campaign.scheduledAt
       : now;
 
-  const created = await prisma.$transaction(async (tx) => {
-    const results = [];
-    for (const email of toAdd) {
-      const firstScheduledAt =
-        campaign.campaignType === "EMAIL"
-          ? base
-          : firstStep
-            ? computeFirstScheduledAt(base, firstStep.delayDays)
-            : null;
+  /**
+   * We keep track of created recipient IDs
+   * so we can return the same data structure.
+   */
+  const createdRecipientIds:
+    string[] = [];
 
-      const recipient = await tx.followUpRecipient.create({
-        data: {
-          campaignId,
-          emailId: email.id,
-          status: "PENDING",
-          currentStep: 0,
-          nextStepAt: firstScheduledAt,
-          steps: {
-            create: campaign.steps.map((step) => ({
-              stepId: step.id,
-              status: "PENDING" as FollowUpStepStatus,
+  /**
+   * ============================================================
+   * BATCH INSERT
+   * ============================================================
+   */
+  for (
+    let i = 0;
+    i < toAdd.length;
+    i += RECIPIENT_BATCH_SIZE
+  ) {
+    const emailBatch =
+      toAdd.slice(
+        i,
+        i + RECIPIENT_BATCH_SIZE
+      );
+
+    const firstScheduledAt =
+      campaign.campaignType ===
+      "EMAIL"
+        ? base
+        : firstStep
+          ? computeFirstScheduledAt(
+              base,
+              firstStep.delayDays
+            )
+          : null;
+
+    /**
+     * Insert recipients.
+     */
+    await prisma.followUpRecipient.createMany(
+      {
+        data: emailBatch.map(
+          (email) => ({
+            campaignId,
+
+            emailId:
+              email.id,
+
+            status:
+              "PENDING",
+
+            currentStep:
+              0,
+
+            nextStepAt:
+              firstScheduledAt,
+          })
+        ),
+      }
+    );
+
+    /**
+     * Get newly inserted recipients.
+     */
+    const createdRecipients =
+      await prisma.followUpRecipient.findMany(
+        {
+          where: {
+            campaignId,
+
+            emailId: {
+              in: emailBatch.map(
+                (email) =>
+                  email.id
+              ),
+            },
+          },
+
+          select: {
+            id: true,
+            emailId: true,
+          },
+        }
+      );
+
+    /**
+     * Keep IDs for final result.
+     */
+    createdRecipientIds.push(
+      ...createdRecipients.map(
+        (r) => r.id
+      )
+    );
+
+    /**
+     * Build recipient-step rows.
+     */
+    const recipientStepData =
+      createdRecipients.flatMap(
+        (recipient) =>
+          campaign.steps.map(
+            (step) => ({
+              recipientId:
+                recipient.id,
+
+              stepId:
+                step.id,
+
+              status:
+                "PENDING" as FollowUpStepStatus,
+
               scheduledAt:
-                firstStep && step.id === firstStep.id
+                firstStep &&
+                step.id ===
+                  firstStep.id
                   ? firstScheduledAt
                   : null,
-            })),
+            })
+          )
+      );
+
+    if (
+      recipientStepData.length >
+      0
+    ) {
+      await prisma.followUpRecipientStep.createMany(
+        {
+          data:
+            recipientStepData,
+        }
+      );
+    }
+  }
+
+  /**
+   * Return created recipients in the
+   * same general structure as before.
+   */
+  const created =
+    await prisma.followUpRecipient.findMany(
+      {
+        where: {
+          id: {
+            in:
+              createdRecipientIds,
           },
         },
+
         include: {
           email: true,
+
           steps: {
-            include: { step: true },
+            include: {
+              step: true,
+            },
           },
         },
-      });
-      results.push(recipient);
-    }
-    return results;
-  });
 
-  return { added: created.length, recipients: created };
+        orderBy: {
+          createdAt:
+            "asc",
+        },
+      }
+    );
+
+  return {
+    added:
+      created.length,
+
+    recipients:
+      created,
+  };
 }
 
 /**
- * Remove a recipient (owner only).
+ * Remove a recipient.
  */
 export async function removeRecipient(
   prisma: PrismaClient,
   recipientId: string,
   userId: string
 ) {
-  const recipient = await prisma.followUpRecipient.findFirst({
-    where: { id: recipientId },
-    include: {
-      campaign: { select: { userId: true, status: true } },
-    },
-  });
+  const recipient =
+    await prisma.followUpRecipient.findFirst(
+      {
+        where: {
+          id: recipientId,
+        },
 
-  if (!recipient || recipient.campaign.userId !== userId) {
-    throw new Error("Recipient not found");
+        include: {
+          campaign: {
+            select: {
+              userId: true,
+              status: true,
+            },
+          },
+        },
+      }
+    );
+
+  if (
+    !recipient ||
+    recipient.campaign.userId !==
+      userId
+  ) {
+    throw new Error(
+      "Recipient not found"
+    );
   }
 
-  await prisma.followUpRecipient.delete({
-    where: { id: recipientId },
-  });
+  await prisma.followUpRecipient.delete(
+    {
+      where: {
+        id: recipientId,
+      },
+    }
+  );
 
-  return { id: recipientId };
+  return {
+    id: recipientId,
+  };
 }
 
 /**
  * Mark a recipient as REPLIED and cancel future steps.
- * Called when the inbox system detects a reply from this contact
- * for a running campaign (integration point).
  */
 export async function handleRecipientReply(
   prisma: PrismaClient,
@@ -1081,73 +2036,163 @@ export async function handleRecipientReply(
     repliedAt?: Date;
   }
 ) {
-  const { campaignId, emailAddress, repliedAt = new Date() } = params;
+  const {
+    campaignId,
+    emailAddress,
+    repliedAt =
+      new Date(),
+  } = params;
 
-  const campaign = await prisma.followUpCampaign.findUnique({
-    where: { id: campaignId },
-    select: { id: true, stopOnReply: true, status: true },
-  });
+  const campaign =
+    await prisma.followUpCampaign.findUnique(
+      {
+        where: {
+          id: campaignId,
+        },
 
-  if (!campaign || !campaign.stopOnReply) {
+        select: {
+          id: true,
+          stopOnReply: true,
+          status: true,
+        },
+      }
+    );
+
+  if (
+    !campaign ||
+    !campaign.stopOnReply
+  ) {
     return null;
   }
-  if (campaign.status === "STOPPED" || campaign.status === "COMPLETED") {
+
+  if (
+    campaign.status ===
+      "STOPPED" ||
+    campaign.status ===
+      "COMPLETED"
+  ) {
     return null;
   }
 
-  const recipient = await prisma.followUpRecipient.findFirst({
-    where: {
-      campaignId,
-      email: { email: emailAddress },
-      status: { in: ["PENDING", "RUNNING"] },
+  const recipient =
+    await prisma.followUpRecipient.findFirst(
+      {
+        where: {
+          campaignId,
+
+          email: {
+            email:
+              emailAddress,
+          },
+
+          status: {
+            in: [
+              "PENDING",
+              "RUNNING",
+            ],
+          },
+        },
+      }
+    );
+
+  if (!recipient) {
+    return null;
+  }
+
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.followUpRecipientStep.updateMany(
+        {
+          where: {
+            recipientId:
+              recipient.id,
+
+            status: {
+              in: [
+                "PENDING",
+                "SENDING",
+              ],
+            },
+          },
+
+          data: {
+            status:
+              "CANCELLED",
+          },
+        }
+      );
+
+      const updated =
+        await tx.followUpRecipient.update(
+          {
+            where: {
+              id: recipient.id,
+            },
+
+            data: {
+              status:
+                "REPLIED",
+
+              repliedAt,
+
+              nextStepAt:
+                null,
+            },
+          }
+        );
+
+      await maybeCompleteCampaign(
+        tx,
+        campaignId
+      );
+
+      return updated;
     },
-  });
-
-  if (!recipient) return null;
-
-  return prisma.$transaction(async (tx) => {
-    await tx.followUpRecipientStep.updateMany({
-      where: {
-        recipientId: recipient.id,
-        status: { in: ["PENDING", "SENDING"] },
-      },
-      data: { status: "CANCELLED" },
-    });
-
-    const updated = await tx.followUpRecipient.update({
-      where: { id: recipient.id },
-      data: {
-        status: "REPLIED",
-        repliedAt,
-        nextStepAt: null,
-      },
-    });
-
-    // Maybe complete the campaign
-    await maybeCompleteCampaign(tx, campaignId);
-
-    return updated;
-  });
+    {
+      maxWait: 10000,
+      timeout: 30000,
+    }
+  );
 }
 
 /**
- * If every recipient is in a terminal state, mark campaign COMPLETED.
+ * If every recipient is in a terminal state,
+ * mark campaign COMPLETED.
  */
 export async function maybeCompleteCampaign(
   prisma: PrismaTx,
   campaignId: string
 ) {
-  const remaining = await prisma.followUpRecipient.count({
-    where: {
-      campaignId,
-      status: { in: ["PENDING", "RUNNING"] },
-    },
-  });
+  const remaining =
+    await prisma.followUpRecipient.count(
+      {
+        where: {
+          campaignId,
 
-  if (remaining === 0) {
-    await prisma.followUpCampaign.update({
-      where: { id: campaignId },
-      data: { status: "COMPLETED" },
-    });
+          status: {
+            in: [
+              "PENDING",
+              "RUNNING",
+            ],
+          },
+        },
+      }
+    );
+
+  if (
+    remaining === 0
+  ) {
+    await prisma.followUpCampaign.update(
+      {
+        where: {
+          id: campaignId,
+        },
+
+        data: {
+          status:
+            "COMPLETED",
+        },
+      }
+    );
   }
 }
