@@ -10,7 +10,6 @@
     "worker": "tsx workers/warmup.worker.ts",
     "reply-worker": "tsx workers/reply.worker.ts",
     "campaign": "tsx workers/campaign.worker.ts"
-
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -64,6 +63,7 @@
     "googleapis": "^174.0.1",
     "groq-sdk": "^1.5.0",
     "imap": "^0.8.19",
+    "imapflow": "^1.7.1",
     "input-otp": "1.4.1",
     "jose": "^6.2.3",
     "jsonwebtoken": "^9.0.3",
@@ -74,7 +74,7 @@
     "next": "16.0.0",
     "next-themes": "^0.4.6",
     "node-cron": "^4.5.0",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^9.0.5",
     "quill": "^2.0.3",
     "react": "19.2.0",
     "react-day-picker": "9.8.0",
